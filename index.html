@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kaiyaa 的主页 - 全栈版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 召唤 Supabase 服务员 (API库) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        douban: '#00b514',
+                        doubanLight: '#eef9ee',
+                        doubanBg: '#f6f6f1'
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // 🚨 新手必看：把你的钥匙贴在这里！！！
+        // ==========================================
+        // 1. URL 我已经帮你填好了，保持不变
+        const SUPABASE_URL = 'https://bwibjnkdfeohwdfdywnd.supabase.co'; 
+        
+        // 2. 把下面单引号里的中文，换成你复制的那个 sb_publishable 开头的超长密钥！(务必保留两边的单引号)
+        const SUPABASE_KEY = 'sb_publishable_AbPf2W0eZC0ehIoDnzl2Yg_Fpt2cCUw'; 
+        // ==========================================
+        
+        // 智能错误排查：检查是否忘记贴密钥
+        window.addEventListener('DOMContentLoaded', () => {
+            if (SUPABASE_KEY.includes('在这里粘贴') || SUPABASE_KEY.trim() === '') {
+                alert("🚨 发现问题！\n你好像忘记把你的『API 密钥』贴回第 32 行了！\n\n快回代码里，把你那个 sb_publishable 开头的长长密钥贴进去（注意千万要保留两边的小单引号 ' '）。");
+            }
+        });
+
+        // 修复：将变量名改为 supabaseClient，避免与 CDN 引入的全局对象 supabase 冲突
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        let currentStatus = "云端数据库连接成功！全世界都能看到我了 🌍";
+
+        function toggleAdminPanel() {
+            document.getElementById('admin-panel').classList.toggle('hidden');
+        }
+
+        // 核心魔法 1：从天上的大黑板（数据库）把内容拉取下来
+        async function fetchMedia() {
+            // 显示加载中
+            document.getElementById('list-reading').innerHTML = '<li class="text-stone-400 text-xs">拼命从云端拉取中...</li>';
+            document.getElementById('list-watching').innerHTML = '<li class="text-stone-400 text-xs">拼命从云端拉取中...</li>';
+            document.getElementById('list-listening').innerHTML = '<li class="text-stone-400 text-xs">拼命从云端拉取中...</li>';
+
+            // 向后厨发送拿菜单的请求
+            const { data, error } = await supabaseClient
+                .from('media_items')
+                .select('*')
+                .order('created_at', { ascending: false }); // 最新的排在最前面
+
+            if (error) {
+                console.error('拉取失败:', error);
+                document.getElementById('list-reading').innerHTML = '<li class="text-red-500 text-xs">拉取失败，请检查配置</li>';
+                document.getElementById('list-watching').innerHTML = '<li class="text-red-500 text-xs">拉取失败，请检查配置</li>';
+                document.getElementById('list-listening').innerHTML = '<li class="text-red-500 text-xs">拉取失败，请检查配置</li>';
+                
+                alert("❌ 从云端拉取数据失败！\n\n具体错误原因：" + error.message + "\n\n排查建议：\n1. 你的密钥是不是填错了（多复制了空格，或者少复制了字母）？\n2. 你在 Supabase 建表（打柜子）那一步是不是没有执行成功？");
+                return;
+            }
+
+            renderLists(data);
+        }
+
+        // 渲染列表函数 (和之前一样，只是数据来源变成了云端)
+        function renderLists(mediaData) {
+            const types = ['reading', 'watching', 'listening'];
+            types.forEach(type => {
+                const ul = document.getElementById(`list-${type}`);
+                if (!ul) return;
+                ul.innerHTML = '';
+                
+                // 筛选出对应类别的数据
+                const currentTypeData = mediaData.filter(item => item.type === type);
+
+                if (currentTypeData.length === 0) {
+                    ul.innerHTML = `<li class="text-stone-400 text-xs italic">暂无记录，按 i 键添加</li>`;
+                } else {
+                    currentTypeData.forEach((item) => {
+                        const stars = '★'.repeat(Number(item.rating || 5)) + '☆'.repeat(5 - Number(item.rating || 5));
+                        const statusTags = {
+                            'wish': { text: '想看', css: 'bg-blue-50 text-blue-600 border-blue-100' },
+                            'doing': { text: '在看', css: 'bg-green-50 text-green-600 border-green-100' },
+                            'collect': { text: '看过', css: 'bg-stone-100 text-stone-600 border-stone-200' }
+                        };
+                        const currentTag = statusTags[item.status] || statusTags['collect'];
+
+                        ul.innerHTML += `
+                            <li class="border-b border-stone-100 pb-3 hover:bg-stone-50/50 p-2 rounded group transition">
+                                <div class="flex justify-between items-start mb-1">
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <span class="text-stone-900 font-medium">${item.title}</span>
+                                        <span class="text-xs text-stone-400">/ ${item.author}</span>
+                                        <span class="text-[10px] px-1.5 py-0.5 border rounded ${currentTag.css}">${currentTag.text}</span>
+                                        <span class="text-xs text-amber-500 font-mono">${stars}</span>
+                                    </div>
+                                    <button onclick="deleteItem(${item.id})" class="text-xs text-stone-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition pl-2">删除</button>
+                                </div>
+                                ${item.comment ? `<p class="text-xs text-stone-500 mt-1 pl-1 bg-stone-50 p-1 rounded border-l-2 border-stone-300 italic">“${item.comment}”</p>` : ''}
+                            </li>
+                        `;
+                    });
+                }
+            });
+        }
+
+        // 核心魔法 2：把新写的东西发送到天上的大黑板
+        async function addItem() {
+            const addBtn = document.getElementById('add-btn');
+            addBtn.innerText = "发送到云端中...";
+            addBtn.disabled = true;
+
+            const type = document.getElementById('item-type').value;
+            const titleInput = document.getElementById('item-title');
+            const authorInput = document.getElementById('item-author');
+            const statusSelect = document.getElementById('item-status');
+            const ratingSelect = document.getElementById('item-rating');
+            const commentInput = document.getElementById('item-comment');
+
+            const title = titleInput.value.trim();
+            let author = authorInput.value.trim();
+            const status = statusSelect.value;
+            const rating = ratingSelect.value;
+            const comment = commentInput.value.trim();
+
+            if (!title) { alert('请输入作品名称'); addBtn.innerText = "添加至我的列表"; addBtn.disabled = false; return; }
+            if (!author) author = '未知';
+
+            const formattedTitle = (type === 'reading' || type === 'watching') && !title.startsWith('《') ? `《${title}》` : title;
+
+            // 调用 API 往云端插入数据
+            const { error } = await supabaseClient
+                .from('media_items')
+                .insert([
+                    { type: type, title: formattedTitle, author: author, status: status, rating: rating, comment: comment }
+                ]);
+
+            if (error) {
+                console.error("添加失败", error);
+                alert("❌ 云端存储失败！\n\n具体错误原因：" + error.message);
+            } else {
+                // 添加成功后清空表单并重新拉取最新数据
+                titleInput.value = '';
+                authorInput.value = '';
+                commentInput.value = '';
+                fetchMedia(); 
+            }
+
+            addBtn.innerText = "添加至我的列表";
+            addBtn.disabled = false;
+        }
+
+        // 核心魔法 3：从云端彻底删除一条记录
+        async function deleteItem(id) {
+            if(confirm("确定要把这条记录从云端彻底删除吗？（全世界都会看不到哦）")) {
+                const { error } = await supabaseClient
+                    .from('media_items')
+                    .delete()
+                    .eq('id', id);
+                
+                if(error) {
+                    alert("❌ 删除失败！\n\n具体错误原因：" + error.message);
+                } else {
+                    fetchMedia(); // 删除后重新刷新
+                }
+            }
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+            if (e.key.toLowerCase() === 'i') {
+                e.preventDefault();
+                document.getElementById('admin-panel').classList.remove('hidden');
+            }
+            if (e.key === 'Escape') {
+                document.getElementById('admin-panel').classList.add('hidden');
+            }
+        });
+
+        // 网页加载时，立刻呼叫服务员去拉取数据
+        window.onload = function() { 
+            // 只有在填了密钥的情况下才去拉取数据，避免一上来就瞎报错
+            if (!SUPABASE_KEY.includes('在这里粘贴') && SUPABASE_KEY.trim() !== '') {
+                fetchMedia(); 
+            }
+        };
+    </script>
+</head>
+<body class="bg-doubanBg text-stone-800 font-sans antialiased min-h-screen py-10 px-4">
+
+    <div class="max-w-[950px] mx-auto bg-white p-8 shadow-sm border border-stone-200 rounded">
+        
+        <div class="flex items-center justify-between border-b border-dashed border-stone-200 pb-6 mb-8">
+            <div class="flex items-baseline gap-4">
+                <h1 class="text-2xl font-bold text-stone-900">Kaiyaa</h1>
+                <span class="text-xs text-stone-400">(常居: 宇宙边缘)</span>
+            </div>
+            
+            <div class="bg-doubanLight text-douban text-xs px-3 py-1.5 rounded-full">
+                💬 <span id="user-status">云端连线正常，一切准备就绪！</span>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-10">
+            
+            <div class="md:col-span-2 space-y-10">
+                <div>
+                    <div class="border-b border-stone-200 pb-1.5 mb-4">
+                        <h2 class="text-base font-medium text-douban">我的书单</h2>
+                    </div>
+                    <ul id="list-reading" class="space-y-4 text-sm"></ul>
+                </div>
+
+                <div>
+                    <div class="border-b border-stone-200 pb-1.5 mb-4">
+                        <h2 class="text-base font-medium text-douban">我的电影圈</h2>
+                    </div>
+                    <ul id="list-watching" class="space-y-4 text-sm"></ul>
+                </div>
+
+                <div>
+                    <div class="border-b border-stone-200 pb-1.5 mb-4">
+                        <h2 class="text-base font-medium text-douban">我的音乐盒</h2>
+                    </div>
+                    <ul id="list-listening" class="space-y-4 text-sm"></ul>
+                </div>
+            </div>
+
+            <div class="space-y-8 border-t md:border-t-0 md:border-l border-stone-200 pt-8 md:pt-0 md:pl-8">
+                <div>
+                    <h3 class="text-xs text-stone-400 mb-3 font-semibold tracking-wider">KAIYAA PROFILE</h3>
+                    <div class="bg-stone-50 p-4 rounded border border-stone-100 text-xs space-y-2">
+                        <p><span class="text-stone-400">系统状态:</span> <span class="text-douban font-bold">☁️ 已接入云数据库</span></p>
+                        <p><span class="text-stone-400">快捷键:</span> 键盘按 <span class="bg-stone-200 px-1 rounded font-mono font-bold">i</span> 键召唤管理面板</p>
+                    </div>
+                </div>
+
+                <div id="admin-panel" class="hidden bg-stone-50 p-4 rounded border border-stone-200 text-xs animate-fade-in">
+                    <div class="flex justify-between items-center mb-3">
+                        <h4 class="font-bold text-stone-700">添加书影音 (直接同步全球)</h4>
+                        <button onclick="toggleAdminPanel()" class="text-stone-400 hover:text-stone-600">✕</button>
+                    </div>
+                    <div class="space-y-3">
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-stone-400 mb-1">类别</label>
+                                <select id="item-type" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                    <option value="reading">📖 读书</option>
+                                    <option value="watching">🎬 电影</option>
+                                    <option value="listening">🎧 音乐</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-stone-400 mb-1">状态</label>
+                                <select id="item-status" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                    <option value="doing">⏳ 在看/在读</option>
+                                    <option value="collect">✅ 看过/读过</option>
+                                    <option value="wish">⭐ 想看/想听</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-stone-400 mb-1">名称</label>
+                            <input type="text" id="item-title" placeholder="作品名称" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                        </div>
+                        <div class="grid grid-cols-3 gap-2 items-end">
+                            <div class="col-span-2">
+                                <label class="block text-stone-400 mb-1">作者/导演</label>
+                                <input type="text" id="item-author" placeholder="作者名" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-stone-400 mb-1">评分</label>
+                                <select id="item-rating" class="w-full
