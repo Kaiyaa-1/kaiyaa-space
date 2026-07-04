@@ -131,7 +131,7 @@
 
             try {
                 const urls = await Promise.all(uploadPromises);
-                // 把数组转成 JSON 字符串存入原有的 text 字段中
+                // 把数组转成 JSON 字符串存入
                 return urls.length > 0 ? JSON.stringify(urls) : null;
             } catch (error) {
                 alert('文件上传失败: ' + error.message);
@@ -139,19 +139,17 @@
             }
         }
 
-        // 兼容新老数据的 URL 解析器
         function parseMediaUrls(urlStr) {
             if (!urlStr) return [];
             try {
                 const parsed = JSON.parse(urlStr);
                 return Array.isArray(parsed) ? parsed : [urlStr];
             } catch (e) {
-                // 如果解析失败，说明是以前的老数据（单张图片的字符串），直接包进数组
                 return [urlStr];
             }
         }
 
-        // ==================== 设置表管理与模式切换 ====================
+        // ==================== 设置表管理 ====================
         async function fetchSettings() {
             const { data, error } = await supabaseClient.from('site_settings').select('*').eq('id', 1).single();
             if (!error && data) {
@@ -169,8 +167,7 @@
         async function updateSettingDB(column, value) {
             const { error } = await supabaseClient.from('site_settings').update({ [column]: value }).eq('id', 1);
             if (error) {
-                alert(`设置保存失败，请确认数据库表已建立！\n错误详情：${error.message}`);
-                // 恢复开关状态
+                alert(`设置保存失败，请确认数据库表已建立并且权限已修复！\n错误详情：${error.message}`);
                 document.getElementById('set-' + column.replace('_visible', '')).checked = !value;
             } else {
                 fetchSettings(); 
@@ -318,7 +315,6 @@
                         if (urls.length > 0) {
                             const firstUrl = urls[0];
                             const isVid = isVideoUrl(firstUrl);
-                            // 将数组转码以便放在 HTML 属性里
                             const encodedUrls = encodeURIComponent(JSON.stringify(urls));
                             const multiPicBadge = urls.length > 1 ? `<div class="absolute top-2 right-2 bg-stone-900/70 text-white text-[10px] px-1.5 py-0.5 rounded backdrop-blur-sm z-10 font-bold">${urls.length} 图</div>` : '';
                             
@@ -348,9 +344,9 @@
                                 ${item.comment ? `<p class="text-xs text-stone-500 pl-2 bg-stone-50 p-2 rounded border-l-2 border-stone-300 italic whitespace-pre-wrap break-words">“${item.comment}”</p>` : ''}
                                 ${fileHtml}
                                 ${isOwnerMode ? `
-                                <div class="flex gap-3 justify-end mt-1">
-                                    <button onclick="triggerEditMedia(${item.id})" class="text-xs text-stone-400 hover:text-blue-500 transition px-2 py-1 bg-white rounded border border-stone-200 shadow-sm">✏️ 编辑</button>
-                                    <button onclick="deleteItem(${item.id})" class="text-xs text-stone-400 hover:text-red-500 transition px-2 py-1 bg-white rounded border border-stone-200 shadow-sm">🗑️ 删除</button>
+                                <div class="flex gap-3 justify-end mt-2 pt-2 border-t border-stone-100">
+                                    <button onclick="triggerEditMedia(${item.id})" class="text-xs text-stone-500 hover:text-blue-500 transition px-3 py-1 bg-white rounded border border-stone-200 shadow-sm">✏️ 编辑</button>
+                                    <button onclick="deleteItem(${item.id})" class="text-xs text-stone-500 hover:text-red-500 transition px-3 py-1 bg-white rounded border border-stone-200 shadow-sm">🗑️ 删除</button>
                                 </div>
                                 ` : ''}
                             </li>
@@ -528,8 +524,8 @@
 
                             ${isOwnerMode ? `
                             <div class="flex gap-3 justify-end mt-3 pt-3 border-t border-stone-200/60">
-                                <button onclick="triggerEditDeck(${deck.id})" class="text-xs text-stone-500 hover:text-blue-500 transition px-2 py-1 bg-white rounded border border-stone-200 shadow-sm">✏️ 编辑</button>
-                                <button onclick="deleteDeck(${deck.id})" class="text-xs text-stone-500 hover:text-red-500 transition px-2 py-1 bg-white rounded border border-stone-200 shadow-sm">🗑️ 删除</button>
+                                <button onclick="triggerEditDeck(${deck.id})" class="text-xs text-stone-500 hover:text-blue-500 transition px-3 py-1 bg-white rounded border border-stone-200 shadow-sm">✏️ 编辑</button>
+                                <button onclick="deleteDeck(${deck.id})" class="text-xs text-stone-500 hover:text-red-500 transition px-3 py-1 bg-white rounded border border-stone-200 shadow-sm">🗑️ 删除</button>
                             </div>
                             ` : ''}
                         </div>
@@ -724,7 +720,7 @@
                 if (e.key === 'Escape') closeMediaPreview();
                 if (e.key === 'ArrowLeft') navigatePreview(-1);
                 if (e.key === 'ArrowRight') navigatePreview(1);
-                return; // 画廊打开时，拦截按键
+                return; 
             }
 
             if (e.key.toLowerCase() === 'i') {
@@ -892,7 +888,6 @@
                             </div>
                             <div>
                                 <label class="block text-stone-400 mb-1">上传文件 (支持多选文件, 可选)</label>
-                                <!-- ✨ 增加了 multiple 属性支持多选 -->
                                 <input type="file" id="item-file" accept="image/*,video/*" multiple class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none text-xs">
                             </div>
                             <div class="flex gap-2 mt-2">
@@ -951,7 +946,6 @@
                             </div>
                             <div>
                                 <label class="block text-stone-400 mb-1">上传文件 (支持多选文件, 可选)</label>
-                                <!-- ✨ 增加了 multiple 属性支持多选 -->
                                 <input type="file" id="deck-file" accept="image/*,video/*" multiple class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none text-xs">
                             </div>
                             <div>
@@ -995,13 +989,10 @@
     <!-- ==================== 沉浸式多图/视频画廊弹窗 ==================== -->
     <div id="media-preview-modal" class="hidden fixed inset-0 z-[110] bg-stone-900/90 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8" onclick="closeMediaPreview()">
         
-        <!-- 关闭按钮 -->
         <button type="button" onclick="event.stopPropagation(); closeMediaPreview();" class="absolute top-4 right-4 z-20 text-white/90 hover:text-white w-10 h-10 flex items-center justify-center rounded-full bg-stone-800/60 hover:bg-stone-700/80 transition text-xl" aria-label="关闭">✕</button>
         
-        <!-- 进度指示器 -->
         <div id="media-preview-counter" class="absolute top-4 left-1/2 -translate-x-1/2 z-20 text-white/90 bg-stone-800/60 px-3 py-1 rounded-full text-xs font-mono hidden">1 / 3</div>
 
-        <!-- 左右切换按钮 -->
         <button type="button" id="media-prev-btn" onclick="event.stopPropagation(); navigatePreview(-1);" class="absolute left-4 top-1/2 -translate-y-1/2 z-20 text-white/70 hover:text-white w-12 h-12 flex items-center justify-center rounded-full bg-stone-800/50 hover:bg-stone-700/80 transition text-3xl hidden pb-1">‹</button>
         <button type="button" id="media-next-btn" onclick="event.stopPropagation(); navigatePreview(1);" class="absolute right-4 top-1/2 -translate-y-1/2 z-20 text-white/70 hover:text-white w-12 h-12 flex items-center justify-center rounded-full bg-stone-800/50 hover:bg-stone-700/80 transition text-3xl hidden pb-1">›</button>
 
