@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kaiyaa 的主页 - 全栈版</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 召唤 Supabase 服务员 (API库) -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
     <script>
@@ -15,75 +14,291 @@
                     colors: {
                         douban: '#00b514',
                         doubanLight: '#eef9ee',
-                        doubanBg: '#f6f6f1'
+                        doubanBg: '#f6f6f1',
+                        hearthstone: '#f59e0b'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        }
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.4s ease-out forwards',
                     }
                 }
             }
         }
 
-        // ==========================================
-        // 🚨 新手必看：把你的钥匙贴在这里！！！
-        // ==========================================
-        // 1. URL 我已经帮你填好了，保持不变
         const SUPABASE_URL = 'https://bwibjnkdfeohwdfdywnd.supabase.co'; 
-        
-        // 2. 把下面单引号里的中文，换成你复制的那个 sb_publishable 开头的超长密钥！(务必保留两边的单引号)
         const SUPABASE_KEY = 'sb_publishable_AbPf2W0eZC0ehIoDnzl2Yg_Fpt2cCUw'; 
-        // ==========================================
         
-        // 智能错误排查：检查是否忘记贴密钥
-        window.addEventListener('DOMContentLoaded', () => {
-            if (SUPABASE_KEY.includes('在这里粘贴') || SUPABASE_KEY.trim() === '') {
-                alert("🚨 发现问题！\n你好像忘记把你的『API 密钥』贴回第 32 行了！\n\n快回代码里，把你那个 sb_publishable 开头的长长密钥贴进去（注意千万要保留两边的小单引号 ' '）。");
-            }
-        });
-
-        // 修复：将变量名改为 supabaseClient，避免与 CDN 引入的全局对象 supabase 冲突
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-        let currentStatus = "云端数据库连接成功！全世界都能看到我了 🌍";
+        // ==================== 全局状态 ====================
+        let isOwnerMode = localStorage.getItem('kaiyaa_admin') === 'true'; 
+        let currentSettings = null; 
+        let currentActiveView = 'reading';
 
-        function toggleAdminPanel() {
-            document.getElementById('admin-panel').classList.toggle('hidden');
-        }
+        let globalMediaData = [];
+        let globalDecksData = [];
+        
+        let editingMediaId = null;
+        let editingDeckId = null;
 
-        // 核心魔法 1：从天上的大黑板（数据库）把内容拉取下来
-        async function fetchMedia() {
-            // 显示加载中
-            document.getElementById('list-reading').innerHTML = '<li class="text-stone-400 text-xs">拼命从云端拉取中...</li>';
-            document.getElementById('list-watching').innerHTML = '<li class="text-stone-400 text-xs">拼命从云端拉取中...</li>';
-            document.getElementById('list-listening').innerHTML = '<li class="text-stone-400 text-xs">拼命从云端拉取中...</li>';
+        // 画廊全局状态
+        let previewUrls = [];
+        let previewIndex = 0;
 
-            // 向后厨发送拿菜单的请求
-            const { data, error } = await supabaseClient
-                .from('media_items')
-                .select('*')
-                .order('created_at', { ascending: false }); // 最新的排在最前面
+        // ==================== 视图切换逻辑 ====================
+        function switchView(viewId) {
+            currentActiveView = viewId;
+            const views = ['reading', 'watching', 'listening', 'hearthstone'];
+            views.forEach(v => {
+                const el = document.getElementById('section-' + v);
+                if(el) {
+                    el.classList.add('hidden');
+                    el.classList.remove('animate-fade-in');
+                }
+                const navEl = document.getElementById('nav-' + v);
+                if(navEl) {
+                    navEl.classList.remove('bg-stone-50', 'text-douban', 'text-hearthstone');
+                    navEl.classList.add('text-stone-600');
+                }
+            });
 
-            if (error) {
-                console.error('拉取失败:', error);
-                document.getElementById('list-reading').innerHTML = '<li class="text-red-500 text-xs">拉取失败，请检查配置</li>';
-                document.getElementById('list-watching').innerHTML = '<li class="text-red-500 text-xs">拉取失败，请检查配置</li>';
-                document.getElementById('list-listening').innerHTML = '<li class="text-red-500 text-xs">拉取失败，请检查配置</li>';
-                
-                alert("❌ 从云端拉取数据失败！\n\n具体错误原因：" + error.message + "\n\n排查建议：\n1. 你的密钥是不是填错了（多复制了空格，或者少复制了字母）？\n2. 你在 Supabase 建表（打柜子）那一步是不是没有执行成功？");
-                return;
+            const targetEl = document.getElementById('section-' + viewId);
+            if(targetEl) {
+                targetEl.classList.remove('hidden');
+                void targetEl.offsetWidth; 
+                targetEl.classList.add('animate-fade-in');
             }
 
-            renderLists(data);
+            const targetNav = document.getElementById('nav-' + viewId);
+            if(targetNav) {
+                targetNav.classList.remove('text-stone-600');
+                targetNav.classList.add('bg-stone-50');
+                if (viewId === 'hearthstone') {
+                    targetNav.classList.add('text-hearthstone');
+                } else {
+                    targetNav.classList.add('text-douban');
+                }
+            }
+
+            if (viewId === 'hearthstone') {
+                toggleFormType('hearthstone');
+            } else {
+                toggleFormType('media');
+                document.getElementById('item-type').value = viewId;
+            }
         }
 
-        // 渲染列表函数 (和之前一样，只是数据来源变成了云端)
+        function toggleSidebar() {
+            const sidebar = document.getElementById('left-sidebar');
+            const body = document.body;
+            sidebar.classList.toggle('w-16');
+            sidebar.classList.toggle('w-48');
+            sidebar.classList.toggle('is-expanded');
+            if (sidebar.classList.contains('w-48')) {
+                body.classList.replace('pl-16', 'pl-48');
+            } else {
+                body.classList.replace('pl-48', 'pl-16');
+            }
+        }
+
+        function toggleAdminPanel() {
+            if (!isOwnerMode) return;
+            const panel = document.getElementById('admin-panel');
+            panel.classList.toggle('hidden');
+            if(panel.classList.contains('hidden')) {
+                resetForms(); 
+            }
+        }
+
+        // ==================== 多文件上传逻辑 ====================
+        async function uploadFilesToSupabase(fileElementId) {
+            const fileInput = document.getElementById(fileElementId);
+            if (!fileInput.files || fileInput.files.length === 0) return null;
+
+            const uploadPromises = Array.from(fileInput.files).map(async (file) => {
+                const fileExt = file.name.split('.').pop();
+                const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
+                const filePath = `public/${fileName}`;
+                const { error } = await supabaseClient.storage.from('uploads').upload(filePath, file);
+                if (error) throw error;
+                return supabaseClient.storage.from('uploads').getPublicUrl(filePath).data.publicUrl;
+            });
+
+            try {
+                const urls = await Promise.all(uploadPromises);
+                // 把数组转成 JSON 字符串存入原有的 text 字段中
+                return urls.length > 0 ? JSON.stringify(urls) : null;
+            } catch (error) {
+                alert('文件上传失败: ' + error.message);
+                return null;
+            }
+        }
+
+        // 兼容新老数据的 URL 解析器
+        function parseMediaUrls(urlStr) {
+            if (!urlStr) return [];
+            try {
+                const parsed = JSON.parse(urlStr);
+                return Array.isArray(parsed) ? parsed : [urlStr];
+            } catch (e) {
+                // 如果解析失败，说明是以前的老数据（单张图片的字符串），直接包进数组
+                return [urlStr];
+            }
+        }
+
+        // ==================== 设置表管理与模式切换 ====================
+        async function fetchSettings() {
+            const { data, error } = await supabaseClient.from('site_settings').select('*').eq('id', 1).single();
+            if (!error && data) {
+                currentSettings = data;
+            } else {
+                currentSettings = { reading_visible: true, watching_visible: true, listening_visible: true, hearthstone_visible: true };
+            }
+            document.getElementById('set-reading').checked = currentSettings.reading_visible;
+            document.getElementById('set-watching').checked = currentSettings.watching_visible;
+            document.getElementById('set-listening').checked = currentSettings.listening_visible;
+            document.getElementById('set-hearthstone').checked = currentSettings.hearthstone_visible;
+            updateNavVisibility();
+        }
+
+        async function updateSettingDB(column, value) {
+            const { error } = await supabaseClient.from('site_settings').update({ [column]: value }).eq('id', 1);
+            if (error) {
+                alert(`设置保存失败，请确认数据库表已建立！\n错误详情：${error.message}`);
+                // 恢复开关状态
+                document.getElementById('set-' + column.replace('_visible', '')).checked = !value;
+            } else {
+                fetchSettings(); 
+            }
+        }
+
+        function updateNavVisibility() {
+            if (!currentSettings) return;
+            const views = ['reading', 'watching', 'listening', 'hearthstone'];
+            let hasVisibleView = false;
+
+            views.forEach(v => {
+                const isVisible = isOwnerMode || currentSettings[`${v}_visible`];
+                const navEl = document.getElementById(`nav-${v}`);
+                if (navEl) {
+                    if (isVisible) {
+                        navEl.classList.remove('hidden');
+                        navEl.classList.add('flex');
+                        hasVisibleView = true;
+                    } else {
+                        navEl.classList.add('hidden');
+                        navEl.classList.remove('flex');
+                    }
+                }
+            });
+
+            if (!isOwnerMode && !currentSettings[`${currentActiveView}_visible`]) {
+                const firstVisible = views.find(v => currentSettings[`${v}_visible`]);
+                if (firstVisible) {
+                    switchView(firstVisible);
+                } else {
+                    const targetSection = document.getElementById(`section-${currentActiveView}`);
+                    if(targetSection) targetSection.classList.add('hidden');
+                }
+            }
+        }
+
+        function secretLogin() {
+            if (isOwnerMode) {
+                document.getElementById('logout-modal').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('login-modal').classList.remove('hidden');
+            document.getElementById('secret-pwd').value = ''; 
+            document.getElementById('pwd-error').classList.add('hidden');
+            setTimeout(() => document.getElementById('secret-pwd').focus(), 50);
+        }
+
+        async function checkPassword() {
+            const pwd = document.getElementById('secret-pwd').value;
+            if (pwd === "Kaiyaa41!") { 
+                localStorage.setItem('kaiyaa_admin', 'true');
+                location.reload(); 
+            } else {
+                const errorMsg = document.getElementById('pwd-error');
+                errorMsg.classList.remove('hidden');
+                const modal = document.getElementById('login-modal-content');
+                modal.classList.add('translate-x-2');
+                setTimeout(() => modal.classList.replace('translate-x-2', '-translate-x-2'), 50);
+                setTimeout(() => modal.classList.replace('-translate-x-2', 'translate-x-0'), 100);
+            }
+        }
+
+        function confirmLogout() {
+            localStorage.removeItem('kaiyaa_admin');
+            location.reload();
+        }
+
+        function toggleFormType(type) {
+            const tabs = ['media', 'hearthstone', 'settings'];
+            tabs.forEach(t => {
+                document.getElementById(`form-${t}`).classList.add('hidden');
+                const tabEl = document.getElementById(`tab-${t}`);
+                tabEl.classList.remove('bg-white', 'shadow-sm', 'text-stone-800');
+                tabEl.classList.add('text-stone-500');
+            });
+
+            document.getElementById(`form-${type}`).classList.remove('hidden');
+            const activeTab = document.getElementById(`tab-${type}`);
+            activeTab.classList.remove('text-stone-500');
+            activeTab.classList.add('bg-white', 'shadow-sm', 'text-stone-800');
+        }
+
+        function resetForms() {
+            editingMediaId = null;
+            editingDeckId = null;
+            
+            document.getElementById('item-title').value = '';
+            document.getElementById('item-author').value = '';
+            document.getElementById('item-comment').value = '';
+            document.getElementById('item-file').value = '';
+            document.getElementById('add-btn').innerText = "添加";
+            document.getElementById('add-btn').classList.replace('bg-orange-500', 'bg-douban');
+
+            document.getElementById('deck-name').value = '';
+            document.getElementById('deck-code').value = '';
+            document.getElementById('deck-desc').value = '';
+            document.getElementById('deck-file').value = '';
+            document.getElementById('deck-add-btn').innerText = "发布我的卡组";
+            document.getElementById('deck-add-btn').classList.replace('bg-orange-500', 'bg-hearthstone');
+        }
+
+        // ==================== 书影音逻辑 ====================
+        async function fetchMedia() {
+            let query = supabaseClient.from('media_items').select('*').order('created_at', { ascending: false });
+            if (!isOwnerMode) query = query.eq('is_public', true);
+            
+            const { data, error } = await query;
+            if (!error) {
+                globalMediaData = data;
+                renderLists(data);
+            } else {
+                const types = ['reading', 'watching', 'listening'];
+                types.forEach(type => {
+                    const ul = document.getElementById(`list-${type}`);
+                    if (ul) ul.innerHTML = `<li class="text-red-400 text-xs">加载失败：${error.message}</li>`;
+                });
+            }
+        }
+
         function renderLists(mediaData) {
             const types = ['reading', 'watching', 'listening'];
             types.forEach(type => {
                 const ul = document.getElementById(`list-${type}`);
                 if (!ul) return;
                 ul.innerHTML = '';
-                
-                // 筛选出对应类别的数据
                 const currentTypeData = mediaData.filter(item => item.type === type);
-
+                
                 if (currentTypeData.length === 0) {
                     ul.innerHTML = `<li class="text-stone-400 text-xs italic">暂无记录，按 i 键添加</li>`;
                 } else {
@@ -95,19 +310,49 @@
                             'collect': { text: '看过', css: 'bg-stone-100 text-stone-600 border-stone-200' }
                         };
                         const currentTag = statusTags[item.status] || statusTags['collect'];
+                        const privateBadge = item.is_public === false ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-500 border border-red-100 ml-2 whitespace-nowrap">🔒 仅自己可见</span>` : '';
+
+                        let fileHtml = '';
+                        let urls = parseMediaUrls(item.file_url);
+                        
+                        if (urls.length > 0) {
+                            const firstUrl = urls[0];
+                            const isVid = isVideoUrl(firstUrl);
+                            // 将数组转码以便放在 HTML 属性里
+                            const encodedUrls = encodeURIComponent(JSON.stringify(urls));
+                            const multiPicBadge = urls.length > 1 ? `<div class="absolute top-2 right-2 bg-stone-900/70 text-white text-[10px] px-1.5 py-0.5 rounded backdrop-blur-sm z-10 font-bold">${urls.length} 图</div>` : '';
+                            
+                            fileHtml = `
+                                <div class="relative max-w-sm mt-3 group/preview cursor-zoom-in">
+                                    ${multiPicBadge}
+                                    <button type="button" class="media-preview-trigger w-full block text-left" data-urls="${encodedUrls}" title="点击放大查看">
+                                        ${isVid 
+                                            ? `<video src="${firstUrl}" class="w-full rounded-md border border-stone-200 shadow-sm pointer-events-none" muted></video>` 
+                                            : `<img src="${firstUrl}" alt="" class="w-full rounded-md border border-stone-200 shadow-sm object-cover pointer-events-none group-hover/preview:opacity-90 transition">`
+                                        }
+                                    </button>
+                                </div>`;
+                        }
 
                         ul.innerHTML += `
-                            <li class="border-b border-stone-100 pb-3 hover:bg-stone-50/50 p-2 rounded group transition">
-                                <div class="flex justify-between items-start mb-1">
-                                    <div class="flex items-center gap-2 flex-wrap">
-                                        <span class="text-stone-900 font-medium">${item.title}</span>
-                                        <span class="text-xs text-stone-400">/ ${item.author}</span>
-                                        <span class="text-[10px] px-1.5 py-0.5 border rounded ${currentTag.css}">${currentTag.text}</span>
-                                        <span class="text-xs text-amber-500 font-mono">${stars}</span>
+                            <li class="border-b border-stone-100 pb-4 hover:bg-stone-50/50 p-3 rounded group transition flex flex-col gap-2">
+                                <div class="flex justify-between items-start gap-4">
+                                    <div class="flex items-center gap-2 flex-wrap flex-1">
+                                        <span class="text-stone-900 font-medium break-words">${item.title}</span>
+                                        <span class="text-xs text-stone-400 break-words">/ ${item.author}</span>
+                                        <span class="text-[10px] px-1.5 py-0.5 border rounded whitespace-nowrap ${currentTag.css}">${currentTag.text}</span>
+                                        <span class="text-xs text-amber-500 font-mono whitespace-nowrap">${stars}</span>
+                                        ${privateBadge}
                                     </div>
-                                    <button onclick="deleteItem(${item.id})" class="text-xs text-stone-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition pl-2">删除</button>
                                 </div>
-                                ${item.comment ? `<p class="text-xs text-stone-500 mt-1 pl-1 bg-stone-50 p-1 rounded border-l-2 border-stone-300 italic">“${item.comment}”</p>` : ''}
+                                ${item.comment ? `<p class="text-xs text-stone-500 pl-2 bg-stone-50 p-2 rounded border-l-2 border-stone-300 italic whitespace-pre-wrap break-words">“${item.comment}”</p>` : ''}
+                                ${fileHtml}
+                                ${isOwnerMode ? `
+                                <div class="flex gap-3 justify-end mt-1">
+                                    <button onclick="triggerEditMedia(${item.id})" class="text-xs text-stone-400 hover:text-blue-500 transition px-2 py-1 bg-white rounded border border-stone-200 shadow-sm">✏️ 编辑</button>
+                                    <button onclick="deleteItem(${item.id})" class="text-xs text-stone-400 hover:text-red-500 transition px-2 py-1 bg-white rounded border border-stone-200 shadow-sm">🗑️ 删除</button>
+                                </div>
+                                ` : ''}
                             </li>
                         `;
                     });
@@ -115,13 +360,37 @@
             });
         }
 
-        // 核心魔法 2：把新写的东西发送到天上的大黑板
+        function triggerEditMedia(id) {
+            const item = globalMediaData.find(i => i.id === id);
+            if (!item) return;
+
+            editingMediaId = id;
+            document.getElementById('item-type').value = item.type || 'reading';
+            document.getElementById('item-is-public').value = (item.is_public !== false).toString();
+            document.getElementById('item-title').value = (item.title || '').replace(/《|》/g, '');
+            document.getElementById('item-author').value = item.author || '';
+            document.getElementById('item-status').value = item.status || 'collect';
+            document.getElementById('item-rating').value = String(item.rating ?? 5);
+            document.getElementById('item-comment').value = item.comment || '';
+            document.getElementById('item-file').value = '';
+
+            const btn = document.getElementById('add-btn');
+            btn.innerText = "保存修改";
+            if (btn.classList.contains('bg-douban')) btn.classList.replace('bg-douban', 'bg-orange-500');
+
+            const panel = document.getElementById('admin-panel');
+            if (panel.classList.contains('hidden')) toggleAdminPanel();
+            toggleFormType('media');
+            switchView(item.type || 'reading');
+            panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
         async function addItem() {
             const addBtn = document.getElementById('add-btn');
-            addBtn.innerText = "发送到云端中...";
-            addBtn.disabled = true;
+            addBtn.innerText = "上传中..."; addBtn.disabled = true;
 
             const type = document.getElementById('item-type').value;
+            const isPublic = document.getElementById('item-is-public').value === 'true'; 
             const titleInput = document.getElementById('item-title');
             const authorInput = document.getElementById('item-author');
             const statusSelect = document.getElementById('item-status');
@@ -130,155 +399,641 @@
 
             const title = titleInput.value.trim();
             let author = authorInput.value.trim();
-            const status = statusSelect.value;
-            const rating = ratingSelect.value;
-            const comment = commentInput.value.trim();
-
-            if (!title) { alert('请输入作品名称'); addBtn.innerText = "添加至我的列表"; addBtn.disabled = false; return; }
+            if (!title) { alert('请输入名称'); addBtn.innerText = editingMediaId ? "保存修改" : "添加"; addBtn.disabled = false; return; }
             if (!author) author = '未知';
-
             const formattedTitle = (type === 'reading' || type === 'watching') && !title.startsWith('《') ? `《${title}》` : title;
 
-            // 调用 API 往云端插入数据
-            const { error } = await supabaseClient
-                .from('media_items')
-                .insert([
-                    { type: type, title: formattedTitle, author: author, status: status, rating: rating, comment: comment }
-                ]);
+            let uploadedFileUrl = null;
+            if (document.getElementById('item-file').files.length > 0) {
+                uploadedFileUrl = await uploadFilesToSupabase('item-file');
+            }
 
-            if (error) {
-                console.error("添加失败", error);
-                alert("❌ 云端存储失败！\n\n具体错误原因：" + error.message);
+            const payload = { 
+                type: type, 
+                title: formattedTitle, 
+                author: author, 
+                status: statusSelect.value, 
+                rating: ratingSelect.value, 
+                comment: commentInput.value.trim(), 
+                is_public: isPublic 
+            };
+
+            if (uploadedFileUrl) payload.file_url = uploadedFileUrl;
+
+            let error;
+            if (editingMediaId) {
+                const res = await supabaseClient.from('media_items').update(payload).eq('id', editingMediaId);
+                error = res.error;
             } else {
-                // 添加成功后清空表单并重新拉取最新数据
-                titleInput.value = '';
-                authorInput.value = '';
-                commentInput.value = '';
+                const res = await supabaseClient.from('media_items').insert([payload]);
+                error = res.error;
+            }
+
+            if (!error) {
+                resetForms();
                 fetchMedia(); 
-            }
+            } else { alert("❌ 云端操作失败！" + error.message); }
 
-            addBtn.innerText = "添加至我的列表";
-            addBtn.disabled = false;
+            addBtn.innerText = "添加"; addBtn.disabled = false;
         }
 
-        // 核心魔法 3：从云端彻底删除一条记录
         async function deleteItem(id) {
-            if(confirm("确定要把这条记录从云端彻底删除吗？（全世界都会看不到哦）")) {
-                const { error } = await supabaseClient
-                    .from('media_items')
-                    .delete()
-                    .eq('id', id);
-                
-                if(error) {
-                    alert("❌ 删除失败！\n\n具体错误原因：" + error.message);
-                } else {
-                    fetchMedia(); // 删除后重新刷新
-                }
+            if(confirm("确定彻底删除吗？")) {
+                const { error } = await supabaseClient.from('media_items').delete().eq('id', id);
+                if(!error) fetchMedia(); 
             }
         }
+
+        // ==================== 炉石传说卡组逻辑 ====================
+        async function fetchDecks() {
+            const container = document.getElementById('list-hearthstone');
+            if(container) container.innerHTML = '<p class="text-stone-400 text-xs">拼命从云端酒馆拉取卡组中...</p>';
+            
+            let query = supabaseClient.from('hearthstone_decks').select('*').order('created_at', { ascending: false });
+            if (!isOwnerMode) query = query.eq('is_public', true);
+
+            const { data, error } = await query;
+            if (!error) {
+                globalDecksData = data;
+                renderDecks(data);
+            } else if (container) {
+                container.innerHTML = `<p class="text-red-400 text-xs">加载失败：${error.message}</p>`;
+            }
+        }
+
+        function renderDecks(decksData) {
+            const container = document.getElementById('list-hearthstone');
+            if(!container) return;
+            container.innerHTML = '';
+
+            if (decksData.length === 0) {
+                container.innerHTML = `<p class="text-stone-400 text-xs italic">酒馆空空如也，按 i 键添加</p>`;
+                return;
+            }
+
+            const classColors = {
+                '死亡骑士': 'bg-cyan-900 text-cyan-100', '恶魔猎手': 'bg-green-800 text-green-100',
+                '德鲁伊': 'bg-amber-700 text-amber-100', '猎人': 'bg-emerald-700 text-emerald-100',
+                '法师': 'bg-blue-600 text-blue-100', '圣骑士': 'bg-yellow-500 text-yellow-900',
+                '牧师': 'bg-stone-100 text-stone-800 border-stone-300 border', '潜行者': 'bg-stone-800 text-stone-100',
+                '萨满祭司': 'bg-indigo-700 text-indigo-100', '术士': 'bg-purple-800 text-purple-100',
+                '战士': 'bg-red-800 text-red-100'
+            };
+
+            decksData.forEach(deck => {
+                const badgeStyle = classColors[deck.class_name] || 'bg-stone-200 text-stone-800';
+                const privateBadge = deck.is_public === false ? `<span class="text-[10px] px-2 py-0.5 rounded shadow-sm whitespace-nowrap bg-red-50 text-red-500 border border-red-200 ml-1">🔒 私有</span>` : '';
+
+                let mediaHtml = '';
+                let urls = parseMediaUrls(deck.image_url);
+
+                if (urls.length > 0) {
+                    const firstUrl = urls[0];
+                    const isVid = isVideoUrl(firstUrl);
+                    const encodedUrls = encodeURIComponent(JSON.stringify(urls));
+                    const multiPicBadge = urls.length > 1 ? `<div class="absolute top-1 right-1 bg-stone-900/70 text-white text-[9px] px-1.5 py-0.5 rounded backdrop-blur-sm z-10 font-bold">${urls.length} 图</div>` : '';
+
+                    mediaHtml = `
+                        <div class="relative w-24 h-24 sm:w-32 sm:h-32 flex-shrink-0 cursor-zoom-in group/preview">
+                            ${multiPicBadge}
+                            <button type="button" class="media-preview-trigger w-full h-full block" data-urls="${encodedUrls}" title="点击放大查看">
+                                ${isVid 
+                                    ? `<video src="${firstUrl}" class="w-full h-full object-cover rounded-md shadow-sm border border-stone-200 pointer-events-none" muted loop autoplay></video>`
+                                    : `<img src="${firstUrl}" alt="${deck.deck_name}" class="w-full h-full object-cover rounded-md shadow-sm border border-stone-200 pointer-events-none group-hover/preview:ring-2 group-hover/preview:ring-hearthstone/50 transition">`
+                                }
+                            </button>
+                        </div>`;
+                }
+
+                container.innerHTML += `
+                    <div class="flex flex-col sm:flex-row gap-4 p-4 border border-stone-200 rounded-lg bg-stone-50/50 hover:shadow-md transition">
+                        ${mediaHtml}
+                        <div class="flex-1 min-w-0 flex flex-col justify-between">
+                            <div>
+                                <div class="flex justify-between items-start gap-2 mb-2">
+                                    <h4 class="font-bold text-stone-900 break-words text-base leading-tight">${deck.deck_name}</h4>
+                                    <div class="flex gap-1 flex-wrap justify-end">
+                                        <span class="text-[10px] px-2 py-0.5 rounded shadow-sm whitespace-nowrap bg-stone-100 text-stone-600 border border-stone-200">${deck.mode || '标准'}</span>
+                                        <span class="text-[10px] px-2 py-0.5 rounded shadow-sm whitespace-nowrap ${badgeStyle}">${deck.class_name}</span>
+                                        ${privateBadge}
+                                    </div>
+                                </div>
+                                <p class="text-xs text-stone-500 mt-1 whitespace-pre-wrap break-words">${deck.description || '这套卡组没有留下简介...'}</p>
+                            </div>
+                            
+                            <div class="mt-4 flex flex-col sm:flex-row gap-2 sm:items-center">
+                                <input type="text" value="${deck.deck_code}" readonly class="text-xs border border-stone-300 p-1.5 rounded w-full bg-white text-stone-600 focus:outline-none focus:border-hearthstone">
+                                <button onclick="copyCode(this, '${deck.deck_code}')" class="whitespace-nowrap text-xs bg-stone-800 text-white px-3 py-1.5 rounded hover:bg-stone-700 transition active:scale-95 text-center">复制代码</button>
+                            </div>
+
+                            ${isOwnerMode ? `
+                            <div class="flex gap-3 justify-end mt-3 pt-3 border-t border-stone-200/60">
+                                <button onclick="triggerEditDeck(${deck.id})" class="text-xs text-stone-500 hover:text-blue-500 transition px-2 py-1 bg-white rounded border border-stone-200 shadow-sm">✏️ 编辑</button>
+                                <button onclick="deleteDeck(${deck.id})" class="text-xs text-stone-500 hover:text-red-500 transition px-2 py-1 bg-white rounded border border-stone-200 shadow-sm">🗑️ 删除</button>
+                            </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        function triggerEditDeck(id) {
+            const deck = globalDecksData.find(d => d.id === id);
+            if (!deck) return;
+
+            editingDeckId = id;
+            document.getElementById('deck-class').value = deck.class_name || '法师';
+            document.getElementById('deck-mode').value = deck.mode || '标准';
+            document.getElementById('deck-is-public').value = (deck.is_public !== false).toString();
+            document.getElementById('deck-name').value = deck.deck_name || '';
+            document.getElementById('deck-code').value = deck.deck_code || '';
+            document.getElementById('deck-desc').value = deck.description || '';
+            document.getElementById('deck-file').value = '';
+
+            const btn = document.getElementById('deck-add-btn');
+            btn.innerText = "保存卡组修改";
+            if (btn.classList.contains('bg-hearthstone')) btn.classList.replace('bg-hearthstone', 'bg-orange-500');
+
+            const panel = document.getElementById('admin-panel');
+            if (panel.classList.contains('hidden')) toggleAdminPanel();
+            toggleFormType('hearthstone');
+            switchView('hearthstone');
+            panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        async function addDeck() {
+            const addBtn = document.getElementById('deck-add-btn');
+            addBtn.innerText = "上传资源中..."; addBtn.disabled = true;
+
+            const className = document.getElementById('deck-class').value;
+            const modeName = document.getElementById('deck-mode').value;
+            const isPublic = document.getElementById('deck-is-public').value === 'true'; 
+            const deckName = document.getElementById('deck-name').value.trim();
+            const deckCode = document.getElementById('deck-code').value.trim();
+            const description = document.getElementById('deck-desc').value.trim();
+
+            if (!deckName || !deckCode) { 
+                alert('名称和代码是必填的哦！'); 
+                addBtn.innerText = editingDeckId ? "保存卡组修改" : "发布我的卡组"; addBtn.disabled = false; 
+                return; 
+            }
+
+            let uploadedFileUrl = null;
+            if (document.getElementById('deck-file').files.length > 0) {
+                uploadedFileUrl = await uploadFilesToSupabase('deck-file');
+            }
+
+            const payload = { 
+                class_name: className, 
+                deck_name: deckName, 
+                deck_code: deckCode, 
+                description: description, 
+                mode: modeName, 
+                is_public: isPublic 
+            };
+
+            if (uploadedFileUrl) payload.image_url = uploadedFileUrl;
+
+            let error;
+            if (editingDeckId) {
+                const res = await supabaseClient.from('hearthstone_decks').update(payload).eq('id', editingDeckId);
+                error = res.error;
+            } else {
+                const res = await supabaseClient.from('hearthstone_decks').insert([payload]);
+                error = res.error;
+            }
+
+            if (!error) {
+                resetForms();
+                fetchDecks(); 
+            } else { alert("❌ 上传失败！" + error.message); }
+
+            addBtn.innerText = "发布我的卡组"; addBtn.disabled = false;
+        }
+
+        async function deleteDeck(id) {
+            if(confirm("确定撕毁卡组吗？")) {
+                const { error } = await supabaseClient.from('hearthstone_decks').delete().eq('id', id);
+                if(!error) fetchDecks(); 
+            }
+        }
+
+        function copyCode(btnElement, code) {
+            navigator.clipboard.writeText(code).then(() => {
+                const originalText = btnElement.innerText;
+                btnElement.innerText = "已复制！";
+                btnElement.classList.replace("bg-stone-800", "bg-hearthstone");
+                setTimeout(() => {
+                    btnElement.innerText = originalText;
+                    btnElement.classList.replace("bg-hearthstone", "bg-stone-800");
+                }, 2000);
+            });
+        }
+
+        // ==================== 画廊：图片/视频放大与切换 ====================
+        function isVideoUrl(url) {
+            return /\.(mp4|webm|ogg)(\?.*)?$/i.test(url || '');
+        }
+
+        function openMediaPreview(urlsJsonStr) {
+            if (!urlsJsonStr) return;
+            previewUrls = JSON.parse(decodeURIComponent(urlsJsonStr));
+            if (previewUrls.length === 0) return;
+            
+            previewIndex = 0;
+            updatePreviewContent();
+
+            const modal = document.getElementById('media-preview-modal');
+            const prevBtn = document.getElementById('media-prev-btn');
+            const nextBtn = document.getElementById('media-next-btn');
+            const counter = document.getElementById('media-preview-counter');
+
+            if (previewUrls.length > 1) {
+                prevBtn.classList.remove('hidden');
+                nextBtn.classList.remove('hidden');
+                counter.classList.remove('hidden');
+            } else {
+                prevBtn.classList.add('hidden');
+                nextBtn.classList.add('hidden');
+                counter.classList.add('hidden');
+            }
+
+            modal.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+        }
+
+        function updatePreviewContent() {
+            const url = previewUrls[previewIndex];
+            const isVideo = isVideoUrl(url);
+            
+            const img = document.getElementById('media-preview-img');
+            const video = document.getElementById('media-preview-video');
+            const counter = document.getElementById('media-preview-counter');
+
+            img.classList.add('hidden');
+            img.removeAttribute('src');
+            video.classList.add('hidden');
+            video.pause();
+            video.removeAttribute('src');
+
+            if (isVideo) {
+                video.src = url;
+                video.classList.remove('hidden');
+            } else {
+                img.src = url;
+                img.classList.remove('hidden');
+            }
+
+            if (previewUrls.length > 1) {
+                counter.innerText = `${previewIndex + 1} / ${previewUrls.length}`;
+            }
+        }
+
+        function navigatePreview(dir) {
+            previewIndex += dir;
+            if (previewIndex < 0) previewIndex = previewUrls.length - 1;
+            if (previewIndex >= previewUrls.length) previewIndex = 0;
+            updatePreviewContent();
+        }
+
+        function closeMediaPreview() {
+            const modal = document.getElementById('media-preview-modal');
+            const video = document.getElementById('media-preview-video');
+            modal.classList.add('hidden');
+            video.pause();
+            video.removeAttribute('src');
+            document.body.classList.remove('overflow-hidden');
+            previewUrls = [];
+        }
+
+        document.addEventListener('click', (e) => {
+            const trigger = e.target.closest('.media-preview-trigger');
+            if (!trigger) return;
+            e.preventDefault();
+            openMediaPreview(trigger.dataset.urls);
+        });
 
         window.addEventListener('keydown', (e) => {
             if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+            
+            const previewModal = document.getElementById('media-preview-modal');
+            const isPreviewOpen = previewModal && !previewModal.classList.contains('hidden');
+            
+            if (isPreviewOpen) {
+                if (e.key === 'Escape') closeMediaPreview();
+                if (e.key === 'ArrowLeft') navigatePreview(-1);
+                if (e.key === 'ArrowRight') navigatePreview(1);
+                return; // 画廊打开时，拦截按键
+            }
+
             if (e.key.toLowerCase() === 'i') {
                 e.preventDefault();
-                document.getElementById('admin-panel').classList.remove('hidden');
+                if (isOwnerMode) toggleAdminPanel();
             }
+            
             if (e.key === 'Escape') {
-                document.getElementById('admin-panel').classList.add('hidden');
+                const adminPanel = document.getElementById('admin-panel');
+                if(adminPanel && !adminPanel.classList.contains('hidden')) {
+                    toggleAdminPanel(); 
+                }
             }
         });
 
-        // 网页加载时，立刻呼叫服务员去拉取数据
         window.onload = function() { 
-            // 只有在填了密钥的情况下才去拉取数据，避免一上来就瞎报错
-            if (!SUPABASE_KEY.includes('在这里粘贴') && SUPABASE_KEY.trim() !== '') {
-                fetchMedia(); 
-            }
+            fetchSettings();
+            fetchMedia(); 
+            fetchDecks();
+            switchView('reading'); 
         };
     </script>
 </head>
-<body class="bg-doubanBg text-stone-800 font-sans antialiased min-h-screen py-10 px-4">
+<body class="bg-doubanBg text-stone-800 font-sans antialiased min-h-screen py-10 pr-4 pl-16 transition-[padding] duration-300">
 
-    <div class="max-w-[950px] mx-auto bg-white p-8 shadow-sm border border-stone-200 rounded">
+    <!-- ==================== 左侧伸缩导航栏 ==================== -->
+    <nav id="left-sidebar" class="fixed left-0 top-0 h-full bg-white border-r border-stone-200 shadow-[2px_0_10px_rgba(0,0,0,0.02)] transition-all duration-300 w-16 z-50 flex flex-col overflow-hidden">
+        
+        <div class="p-4 border-b border-stone-100 flex items-center h-[73px] flex-shrink-0 cursor-pointer hover:bg-stone-50 transition" onclick="toggleSidebar()">
+            <svg class="w-7 h-7 text-stone-600 min-w-[28px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+            </svg>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto py-4 flex flex-col space-y-2">
+            <a id="nav-reading" href="javascript:void(0)" onclick="switchView('reading')" class="flex items-center px-4 py-3 text-stone-600 hover:bg-stone-50 hover:text-douban transition group">
+                <span class="text-xl min-w-[28px] text-center">📖</span>
+                <span class="ml-4 whitespace-nowrap opacity-0 [.is-expanded_&]:opacity-100 transition-opacity duration-300 font-medium">我读</span>
+            </a>
+            <a id="nav-watching" href="javascript:void(0)" onclick="switchView('watching')" class="flex items-center px-4 py-3 text-stone-600 hover:bg-stone-50 hover:text-douban transition group">
+                <span class="text-xl min-w-[28px] text-center">🎬</span>
+                <span class="ml-4 whitespace-nowrap opacity-0 [.is-expanded_&]:opacity-100 transition-opacity duration-300 font-medium">我看</span>
+            </a>
+            <a id="nav-listening" href="javascript:void(0)" onclick="switchView('listening')" class="flex items-center px-4 py-3 text-stone-600 hover:bg-stone-50 hover:text-douban transition group">
+                <span class="text-xl min-w-[28px] text-center">🎧</span>
+                <span class="ml-4 whitespace-nowrap opacity-0 [.is-expanded_&]:opacity-100 transition-opacity duration-300 font-medium">我听</span>
+            </a>
+            <a id="nav-hearthstone" href="javascript:void(0)" onclick="switchView('hearthstone')" class="flex items-center px-4 py-3 text-stone-600 hover:bg-stone-50 hover:text-hearthstone transition group">
+                <span class="text-xl min-w-[28px] text-center">⚔️</span>
+                <span class="ml-4 whitespace-nowrap opacity-0 [.is-expanded_&]:opacity-100 transition-opacity duration-300 font-medium">炉石酒馆</span>
+            </a>
+        </div>
+    </nav>
+
+    <div class="max-w-[1000px] mx-auto bg-white p-8 shadow-sm border border-stone-200 rounded">
         
         <div class="flex items-center justify-between border-b border-dashed border-stone-200 pb-6 mb-8">
             <div class="flex items-baseline gap-4">
-                <h1 class="text-2xl font-bold text-stone-900">Kaiyaa</h1>
-                <span class="text-xs text-stone-400">(常居: 宇宙边缘)</span>
-            </div>
-            
-            <div class="bg-doubanLight text-douban text-xs px-3 py-1.5 rounded-full">
-                💬 <span id="user-status">云端连线正常，一切准备就绪！</span>
+                <h1 class="text-2xl font-bold text-stone-900">Kaiyaa 的主页</h1>
+                <span onclick="secretLogin()" class="text-xs text-stone-400 cursor-pointer hover:text-stone-600 transition" title="嘘... 这里有个隐藏入口">我是站长</span>
             </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-10">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-10">
             
-            <div class="md:col-span-2 space-y-10">
-                <div>
+            <div class="lg:col-span-2 relative min-h-[400px]">
+                
+                <div id="section-reading" class="view-section hidden">
                     <div class="border-b border-stone-200 pb-1.5 mb-4">
                         <h2 class="text-base font-medium text-douban">我的书单</h2>
                     </div>
                     <ul id="list-reading" class="space-y-4 text-sm"></ul>
                 </div>
-
-                <div>
+                
+                <div id="section-watching" class="view-section hidden">
                     <div class="border-b border-stone-200 pb-1.5 mb-4">
                         <h2 class="text-base font-medium text-douban">我的电影圈</h2>
                     </div>
                     <ul id="list-watching" class="space-y-4 text-sm"></ul>
                 </div>
-
-                <div>
+                
+                <div id="section-listening" class="view-section hidden">
                     <div class="border-b border-stone-200 pb-1.5 mb-4">
                         <h2 class="text-base font-medium text-douban">我的音乐盒</h2>
                     </div>
                     <ul id="list-listening" class="space-y-4 text-sm"></ul>
                 </div>
-            </div>
 
-            <div class="space-y-8 border-t md:border-t-0 md:border-l border-stone-200 pt-8 md:pt-0 md:pl-8">
-                <div>
-                    <h3 class="text-xs text-stone-400 mb-3 font-semibold tracking-wider">KAIYAA PROFILE</h3>
-                    <div class="bg-stone-50 p-4 rounded border border-stone-100 text-xs space-y-2">
-                        <p><span class="text-stone-400">系统状态:</span> <span class="text-douban font-bold">☁️ 已接入云数据库</span></p>
-                        <p><span class="text-stone-400">快捷键:</span> 键盘按 <span class="bg-stone-200 px-1 rounded font-mono font-bold">i</span> 键召唤管理面板</p>
+                <div id="section-hearthstone" class="view-section hidden pb-10">
+                    <div class="border-b border-stone-200 pb-1.5 mb-4 flex justify-between items-end">
+                        <h2 class="text-lg font-bold text-hearthstone">炉石酒馆卡组收藏</h2>
+                        <span class="text-xs text-stone-400">各职业精选构筑</span>
                     </div>
+                    <div id="list-hearthstone" class="grid grid-cols-1 gap-4"></div>
                 </div>
 
-                <div id="admin-panel" class="hidden bg-stone-50 p-4 rounded border border-stone-200 text-xs animate-fade-in">
-                    <div class="flex justify-between items-center mb-3">
-                        <h4 class="font-bold text-stone-700">添加书影音 (直接同步全球)</h4>
-                        <button onclick="toggleAdminPanel()" class="text-stone-400 hover:text-stone-600">✕</button>
+            </div>
+
+            <div class="space-y-8 border-t lg:border-t-0 lg:border-l border-stone-200 pt-8 lg:pt-0 lg:pl-8">
+                
+                <div id="admin-panel" class="hidden bg-stone-50 p-1 rounded-lg border border-stone-200 text-xs shadow-xl animate-fade-in sticky top-8 z-40">
+                    
+                    <div class="flex p-1 bg-stone-100 rounded-md mb-4 relative">
+                        <button id="tab-media" onclick="toggleFormType('media')" class="flex-1 py-1.5 text-center font-bold rounded bg-white shadow-sm text-stone-800 transition">书影音</button>
+                        <button id="tab-hearthstone" onclick="toggleFormType('hearthstone')" class="flex-1 py-1.5 text-center font-bold rounded text-stone-500 hover:text-stone-700 transition">炉石</button>
+                        <button id="tab-settings" onclick="toggleFormType('settings')" class="flex-1 py-1.5 text-center font-bold rounded text-stone-500 hover:text-stone-700 transition">全局设置</button>
+                        <button onclick="toggleAdminPanel()" class="absolute -top-3 -right-3 bg-white border border-stone-200 rounded-full w-6 h-6 flex items-center justify-center text-stone-400 hover:text-stone-700 shadow-sm">✕</button>
                     </div>
-                    <div class="space-y-3">
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label class="block text-stone-400 mb-1">类别</label>
-                                <select id="item-type" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
-                                    <option value="reading">📖 读书</option>
-                                    <option value="watching">🎬 电影</option>
-                                    <option value="listening">🎧 音乐</option>
-                                </select>
+
+                    <div class="p-3 pt-0">
+                        <!-- 表单 1：书影音 -->
+                        <div id="form-media" class="space-y-3">
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-stone-400 mb-1">类别</label>
+                                    <select id="item-type" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                        <option value="reading">📖 读书</option>
+                                        <option value="watching">🎬 电影</option>
+                                        <option value="listening">🎧 音乐</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-stone-400 mb-1">可见性</label>
+                                    <select id="item-is-public" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-bold text-stone-700">
+                                        <option value="true">🌍 公开 (访客可见)</option>
+                                        <option value="false">🔒 私密 (仅自己可见)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div class="col-span-2">
+                                    <label class="block text-stone-400 mb-1">名称</label>
+                                    <input type="text" id="item-title" placeholder="作品名称" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-3 gap-2 items-end">
+                                <div class="col-span-2">
+                                    <label class="block text-stone-400 mb-1">作者/导演</label>
+                                    <input type="text" id="item-author" placeholder="作者名" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-stone-400 mb-1">状态</label>
+                                    <select id="item-status" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                        <option value="collect">✅ 看/读过</option>
+                                        <option value="doing">⏳ 在看</option>
+                                        <option value="wish">⭐ 想看</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-3 gap-2 items-end">
+                                <div class="col-span-1">
+                                    <label class="block text-stone-400 mb-1">评分</label>
+                                    <select id="item-rating" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none text-amber-500 font-bold">
+                                        <option value="5">★★★★★</option>
+                                        <option value="4">★★★★☆</option>
+                                        <option value="3">★★★☆☆</option>
+                                        <option value="2">★★☆☆☆</option>
+                                        <option value="1">★☆☆☆☆</option>
+                                    </select>
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="block text-stone-400 mb-1">简短评论 (可选)</label>
+                                    <input type="text" id="item-comment" placeholder="一句话说说想法..." class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                </div>
                             </div>
                             <div>
-                                <label class="block text-stone-400 mb-1">状态</label>
-                                <select id="item-status" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
-                                    <option value="doing">⏳ 在看/在读</option>
-                                    <option value="collect">✅ 看过/读过</option>
-                                    <option value="wish">⭐ 想看/想听</option>
-                                </select>
+                                <label class="block text-stone-400 mb-1">上传文件 (支持多选文件, 可选)</label>
+                                <!-- ✨ 增加了 multiple 属性支持多选 -->
+                                <input type="file" id="item-file" accept="image/*,video/*" multiple class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none text-xs">
+                            </div>
+                            <div class="flex gap-2 mt-2">
+                                <button onclick="resetForms()" class="w-1/3 bg-stone-200 text-stone-600 py-2 rounded font-medium hover:bg-stone-300 transition">清空</button>
+                                <button id="add-btn" onclick="addItem()" class="w-2/3 bg-douban text-white py-2 rounded font-medium hover:opacity-90 transition">添加</button>
                             </div>
                         </div>
-                        <div>
-                            <label class="block text-stone-400 mb-1">名称</label>
-                            <input type="text" id="item-title" placeholder="作品名称" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
-                        </div>
-                        <div class="grid grid-cols-3 gap-2 items-end">
-                            <div class="col-span-2">
-                                <label class="block text-stone-400 mb-1">作者/导演</label>
-                                <input type="text" id="item-author" placeholder="作者名" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+
+                        <!-- 表单 2：炉石传说 -->
+                        <div id="form-hearthstone" class="space-y-3 hidden">
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-stone-400 mb-1">职业</label>
+                                    <select id="deck-class" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-bold text-stone-700 text-xs">
+                                        <option value="死亡骑士">🗡️ 死亡骑士</option>
+                                        <option value="恶魔猎手">⚔️ 恶魔猎手</option>
+                                        <option value="德鲁伊">🐻 德鲁伊</option>
+                                        <option value="猎人">🏹 猎人</option>
+                                        <option value="法师">🔮 法师</option>
+                                        <option value="圣骑士">🛡️ 圣骑士</option>
+                                        <option value="牧师">✨ 牧师</option>
+                                        <option value="潜行者">🗡️ 潜行者</option>
+                                        <option value="萨满祭司">⚡ 萨满祭司</option>
+                                        <option value="术士">💀 术士</option>
+                                        <option value="战士">🛡️ 战士</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-stone-400 mb-1">可见性</label>
+                                    <select id="deck-is-public" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-bold text-stone-700 text-xs">
+                                        <option value="true">🌍 公开</option>
+                                        <option value="false">🔒 私密</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div class="col-span-2">
+                                    <label class="block text-stone-400 mb-1">卡组名称 <span class="text-red-400">*</span></label>
+                                    <input type="text" id="deck-name" placeholder="如: 宇宙战" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-3 gap-2">
+                                <div>
+                                    <label class="block text-stone-400 mb-1">模式</label>
+                                    <select id="deck-mode" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-bold text-stone-700 text-xs">
+                                        <option value="标准">🦅 标准</option>
+                                        <option value="狂野">🐺 狂野</option>
+                                        <option value="竞技场">⚔️ 竞技场</option>
+                                        <option value="其他">🃏 其他</option>
+                                    </select>
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="block text-stone-400 mb-1">代码 <span class="text-red-400">*</span></label>
+                                    <input type="text" id="deck-code" placeholder="AAECAQ..." class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-mono text-[10px]">
+                                </div>
                             </div>
                             <div>
-                                <label class="block text-stone-400 mb-1">评分</label>
-                                <select id="item-rating" class="w-full
+                                <label class="block text-stone-400 mb-1">上传文件 (支持多选文件, 可选)</label>
+                                <!-- ✨ 增加了 multiple 属性支持多选 -->
+                                <input type="file" id="deck-file" accept="image/*,video/*" multiple class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none text-xs">
+                            </div>
+                            <div>
+                                <label class="block text-stone-400 mb-1">卡组简介 (可选)</label>
+                                <textarea id="deck-desc" placeholder="说说这套卡组的优劣势或起手留牌..." class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none resize-none" rows="2"></textarea>
+                            </div>
+                            <div class="flex gap-2 mt-2">
+                                <button onclick="resetForms()" class="w-1/3 bg-stone-200 text-stone-600 py-2 rounded font-bold hover:bg-stone-300 transition shadow-sm">清空</button>
+                                <button id="deck-add-btn" onclick="addDeck()" class="w-2/3 bg-hearthstone text-white py-2 rounded font-bold hover:opacity-90 transition shadow-sm">发布我的卡组</button>
+                            </div>
+                        </div>
+
+                        <!-- 表单 3：全局板块设置 -->
+                        <div id="form-settings" class="space-y-4 hidden pt-2">
+                            <p class="text-[11px] text-stone-400 mb-3 bg-stone-100 p-2 rounded border border-stone-200">
+                                提示：关闭开关后，访客将无法在左侧菜单看到该板块，也无法访问里面的数据。（你自己在站长模式下依然可见）
+                            </p>
+                            <div class="flex justify-between items-center border-b border-stone-100 pb-2">
+                                <span class="font-bold text-stone-700">📖 我的书单</span>
+                                <input type="checkbox" id="set-reading" onchange="updateSettingDB('reading_visible', this.checked)" class="w-4 h-4 accent-douban">
+                            </div>
+                            <div class="flex justify-between items-center border-b border-stone-100 pb-2">
+                                <span class="font-bold text-stone-700">🎬 我的电影</span>
+                                <input type="checkbox" id="set-watching" onchange="updateSettingDB('watching_visible', this.checked)" class="w-4 h-4 accent-douban">
+                            </div>
+                            <div class="flex justify-between items-center border-b border-stone-100 pb-2">
+                                <span class="font-bold text-stone-700">🎧 我的音乐</span>
+                                <input type="checkbox" id="set-listening" onchange="updateSettingDB('listening_visible', this.checked)" class="w-4 h-4 accent-douban">
+                            </div>
+                            <div class="flex justify-between items-center border-b border-stone-100 pb-2">
+                                <span class="font-bold text-stone-700">⚔️ 炉石酒馆</span>
+                                <input type="checkbox" id="set-hearthstone" onchange="updateSettingDB('hearthstone_visible', this.checked)" class="w-4 h-4 accent-hearthstone">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== 沉浸式多图/视频画廊弹窗 ==================== -->
+    <div id="media-preview-modal" class="hidden fixed inset-0 z-[110] bg-stone-900/90 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8" onclick="closeMediaPreview()">
+        
+        <!-- 关闭按钮 -->
+        <button type="button" onclick="event.stopPropagation(); closeMediaPreview();" class="absolute top-4 right-4 z-20 text-white/90 hover:text-white w-10 h-10 flex items-center justify-center rounded-full bg-stone-800/60 hover:bg-stone-700/80 transition text-xl" aria-label="关闭">✕</button>
+        
+        <!-- 进度指示器 -->
+        <div id="media-preview-counter" class="absolute top-4 left-1/2 -translate-x-1/2 z-20 text-white/90 bg-stone-800/60 px-3 py-1 rounded-full text-xs font-mono hidden">1 / 3</div>
+
+        <!-- 左右切换按钮 -->
+        <button type="button" id="media-prev-btn" onclick="event.stopPropagation(); navigatePreview(-1);" class="absolute left-4 top-1/2 -translate-y-1/2 z-20 text-white/70 hover:text-white w-12 h-12 flex items-center justify-center rounded-full bg-stone-800/50 hover:bg-stone-700/80 transition text-3xl hidden pb-1">‹</button>
+        <button type="button" id="media-next-btn" onclick="event.stopPropagation(); navigatePreview(1);" class="absolute right-4 top-1/2 -translate-y-1/2 z-20 text-white/70 hover:text-white w-12 h-12 flex items-center justify-center rounded-full bg-stone-800/50 hover:bg-stone-700/80 transition text-3xl hidden pb-1">›</button>
+
+        <img id="media-preview-img" class="hidden max-h-[90vh] max-w-[95vw] object-contain rounded-lg shadow-2xl" onclick="event.stopPropagation()" alt="放大预览">
+        <video id="media-preview-video" class="hidden max-h-[90vh] max-w-[95vw] rounded-lg shadow-2xl" controls onclick="event.stopPropagation()"></video>
+    </div>
+
+    <!-- ==================== 站长登录炫酷弹窗 ==================== -->
+    <div id="login-modal" class="hidden fixed inset-0 bg-stone-900/40 backdrop-blur-sm z-[100] flex items-center justify-center transition-opacity">
+        <div id="login-modal-content" class="bg-white p-6 rounded-lg shadow-2xl w-80 max-w-[90%] transform transition-transform duration-100 ease-in-out">
+            <h3 class="text-lg font-bold text-stone-800 mb-2">🕵️‍♂️ 隐藏入口</h3>
+            <p class="text-xs text-stone-500 mb-4">请输入站长专属暗号激活最高权限：</p>
+            <input type="password" id="secret-pwd" placeholder="输入密码..." class="w-full border border-stone-200 p-2 rounded mb-2 focus:outline-none focus:border-stone-800 focus:ring-1 focus:ring-stone-800 transition" onkeydown="if(event.key==='Enter') checkPassword()">
+            <p id="pwd-error" class="hidden text-xs text-red-500 mb-2">❌ 暗号错误，警报拉响！</p>
+            <div class="flex justify-end gap-2 mt-4">
+                <button onclick="document.getElementById('login-modal').classList.add('hidden')" class="px-4 py-2 text-xs text-stone-500 hover:bg-stone-100 rounded transition">取消</button>
+                <button onclick="checkPassword()" class="px-4 py-2 text-xs bg-stone-800 text-white rounded hover:bg-stone-700 transition shadow-sm">验证</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== 退出登录弹窗 ==================== -->
+    <div id="logout-modal" class="hidden fixed inset-0 bg-stone-900/40 backdrop-blur-sm z-[100] flex items-center justify-center transition-opacity">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-80 max-w-[90%] transform transition-all">
+            <h3 class="text-lg font-bold text-stone-800 mb-2">👋 退出站长模式</h3>
+            <p class="text-xs text-stone-500 mb-4">确定要退出登录，切回普通访客视角吗？</p>
+            <div class="flex justify-end gap-2">
+                <button onclick="document.getElementById('logout-modal').classList.add('hidden')" class="px-4 py-2 text-xs text-stone-500 hover:bg-stone-100 rounded transition">取消</button>
+                <button onclick="confirmLogout()" class="px-4 py-2 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition shadow-sm">确定退出</button>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
