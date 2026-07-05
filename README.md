@@ -36,6 +36,47 @@ npm run preview
 
 构建产物在 `dist/` 目录，可部署到 GitHub Pages、Netlify、Vercel 等静态托管平台。
 
+## Vercel 部署（新手步骤）
+
+如果你用 Vercel 托管，按下面做即可：
+
+### 第一步：合并代码
+
+1. 打开 GitHub 上的 PR：[#2 全面优化](https://github.com/Kaiyaa-1/kaiyaa-space/pull/2)
+2. 点击 **Merge pull request** → **Confirm merge**
+
+合并后 Vercel 会自动检测到代码变化。
+
+### 第二步：在 Vercel 填写 3 个环境变量
+
+1. 打开 [vercel.com](https://vercel.com) 并登录
+2. 进入你的 **kaiyaa-space** 项目
+3. 点顶部 **Settings** → 左侧 **Environment Variables**
+4. 依次添加下面 3 条（Name 填左边，Value 填右边）：
+
+| Name | Value |
+|------|-------|
+| `VITE_SUPABASE_URL` | `https://bwibjnkdfeohwdfdywnd.supabase.co` |
+| `VITE_SUPABASE_KEY` | 你的 Supabase publishable key |
+| `VITE_ADMIN_PASSWORD` | 你的站长登录密码 |
+
+5. 每条添加时，Environment 勾选 **Production**、**Preview**、**Development** 全选
+6. 点 **Save**
+
+### 第三步：重新部署
+
+1. 在项目里点 **Deployments**
+2. 找到最新一条部署，点右侧 **⋯** → **Redeploy**
+3. 等 1～2 分钟，状态变成 **Ready** 就成功了
+
+### 验证
+
+- 打开你的网站地址，能正常看到书影音和炉石内容
+- 点「站长入口」，输入密码能进入管理后台
+- 地址栏输入 `你的域名/#hearthstone` 能直接打开炉石板块
+
+> 如果合并后网站空白或数据加载失败，通常是环境变量没填或填错，回到第二步检查。
+
 ## 环境变量
 
 | 变量 | 说明 |
