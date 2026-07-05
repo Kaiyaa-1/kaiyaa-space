@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.sidebar-transition {
+  will-change: transform, width;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.view-section {
+  will-change: opacity, transform;
+}
+
+.gpu-accelerate {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+.lucide {
+  width: 1.15em;
+  height: 1.15em;
+  display: inline-block;
+  vertical-align: -0.125em;
+}
+
+#toast-container {
+  pointer-events: none;
+}
+
+.toast-item {
+  pointer-events: auto;
+}
+
+@media (max-width: 640px) {
+  body.sidebar-expanded {
+    overflow: hidden;
+  }
+}
