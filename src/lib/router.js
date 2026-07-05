@@ -1,30 +1,51 @@
 import { state, VIEWS } from '../state.js';
 
 let switchViewCallback = null;
+let routerReady = false;
 
 export function initRouter(onSwitchView) {
   switchViewCallback = onSwitchView;
-  window.addEventListener('hashchange', handleHashChange);
-  handleHashChange();
+  window.addEventListener('hashchange', () => {
+    if (!routerReady || !state.currentSettings) return;
+    const view = resolveView(state.currentSettings);
+    switchViewCallback?.(view);
+  });
+}
+
+export function markRouterReady() {
+  routerReady = true;
+}
+
+export function resolveView(settings) {
+  if (!settings) return 'reading';
+
+  const hash = window.location.hash.replace('#', '');
+  const preferred = VIEWS.includes(hash) ? hash : 'reading';
+
+  if (state.isOwnerMode || settings[`${preferred}_visible`]) {
+    return preferred;
+  }
+
+  return VIEWS.find((v) => settings[`${v}_visible`]) || 'reading';
 }
 
 export function navigateToView(viewId) {
   if (!VIEWS.includes(viewId)) return;
+  switchViewCallback?.(viewId);
+
   const hash = `#${viewId}`;
   if (window.location.hash !== hash) {
-    window.location.hash = hash;
-  } else {
-    switchViewCallback?.(viewId);
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
   }
 }
 
-function handleHashChange() {
-  const hash = window.location.hash.replace('#', '');
-  const viewId = VIEWS.includes(hash) ? hash : 'reading';
-  switchViewCallback?.(viewId);
+export function syncHash(viewId) {
+  const hash = `#${viewId}`;
+  if (window.location.hash !== hash) {
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
+  }
 }
 
 export function getInitialView() {
-  const hash = window.location.hash.replace('#', '');
-  return VIEWS.includes(hash) ? hash : 'reading';
+  return resolveView(state.currentSettings);
 }

@@ -1,5 +1,6 @@
 import { state } from '../state.js';
 import { isVideoUrl } from '../lib/media-utils.js';
+import { showModal, hideModal } from '../lib/modal.js';
 
 export function initPreview() {
   document.addEventListener('click', (e) => {
@@ -9,7 +10,9 @@ export function initPreview() {
     openMediaPreview(trigger.dataset.urls);
   });
 
-  document.getElementById('media-preview-modal')?.addEventListener('click', closeMediaPreview);
+  document.getElementById('media-preview-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'media-preview-modal') closeMediaPreview();
+  });
   document.getElementById('preview-close')?.addEventListener('click', (e) => {
     e.stopPropagation();
     closeMediaPreview();
@@ -55,8 +58,7 @@ function openMediaPreview(urlsJsonStr) {
   nextBtn?.classList.toggle('hidden', !multi);
   counter?.classList.toggle('hidden', !multi);
 
-  modal?.classList.remove('hidden');
-  document.body.classList.add('overflow-hidden');
+  showModal(modal);
 }
 
 function updatePreviewContent() {
@@ -97,9 +99,8 @@ function navigatePreview(dir) {
 function closeMediaPreview() {
   const modal = document.getElementById('media-preview-modal');
   const video = document.getElementById('media-preview-video');
-  modal?.classList.add('hidden');
+  hideModal(modal);
   video?.pause();
   video?.removeAttribute('src');
-  document.body.classList.remove('overflow-hidden');
   state.previewUrls = [];
 }

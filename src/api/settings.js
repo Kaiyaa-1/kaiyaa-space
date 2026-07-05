@@ -49,7 +49,7 @@ export async function updateSettingDB(column, value) {
   await fetchSettings();
 }
 
-export function updateNavVisibility(switchViewFn) {
+export function updateNavVisibility() {
   if (!state.currentSettings) return;
 
   const views = ['reading', 'watching', 'listening', 'hearthstone'];
@@ -66,13 +66,4 @@ export function updateNavVisibility(switchViewFn) {
       navEl.classList.remove('flex');
     }
   });
-
-  if (!state.isOwnerMode && !state.currentSettings[`${state.currentActiveView}_visible`]) {
-    const firstVisible = views.find((v) => state.currentSettings[`${v}_visible`]);
-    if (firstVisible) {
-      switchViewFn(firstVisible);
-    } else {
-      document.getElementById(`section-${state.currentActiveView}`)?.classList.add('hidden');
-    }
-  }
 }

@@ -1,4 +1,4 @@
-import { showToast } from './toast.js';
+import { showModal, hideModal } from './modal.js';
 
 let resolveConfirm = null;
 
@@ -15,7 +15,7 @@ export function initConfirmDialog() {
 }
 
 function closeConfirm(result) {
-  document.getElementById('confirm-modal')?.classList.add('hidden');
+  hideModal(document.getElementById('confirm-modal'));
   if (resolveConfirm) {
     resolveConfirm(result);
     resolveConfirm = null;
@@ -33,12 +33,6 @@ export function showConfirm(message, { title = '确认操作', confirmText = '�
     okBtn.className = danger
       ? 'px-4 py-2 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition shadow-sm'
       : 'px-4 py-2 text-xs bg-stone-800 text-white rounded hover:bg-stone-700 transition shadow-sm';
-    modal?.classList.remove('hidden');
+    showModal(modal);
   });
-}
-
-export async function confirmOrToast(message, options) {
-  const ok = await showConfirm(message, options);
-  if (!ok) showToast('已取消', 'info', 1500);
-  return ok;
 }

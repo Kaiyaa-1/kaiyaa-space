@@ -1,7 +1,7 @@
 import './style.css';
 import { refreshIcons } from './lib/icons.js';
 import { initAuth } from './lib/auth.js';
-import { initRouter, getInitialView } from './lib/router.js';
+import { initRouter, resolveView, syncHash, markRouterReady } from './lib/router.js';
 import { initConfirmDialog } from './lib/confirm.js';
 import { fetchSettings, updateNavVisibility } from './api/settings.js';
 import { fetchMedia } from './api/media.js';
@@ -23,7 +23,7 @@ import { showToast } from './lib/toast.js';
 
 async function reloadAllData() {
   await fetchSettings();
-  updateNavVisibility(switchView);
+  updateNavVisibility();
   await Promise.all([fetchMedia(), fetchDecks()]);
 }
 
@@ -77,7 +77,7 @@ function initGlobalEvents() {
   });
 
   window.addEventListener('settings-updated', () => {
-    updateNavVisibility(switchView);
+    updateNavVisibility();
   });
 }
 
@@ -87,23 +87,29 @@ async function init() {
   initPreview();
   initForms();
   initGlobalEvents();
-
   initRouter(switchView);
   initAuth(reloadAllData);
 
   if (!isSupabaseConfigured) {
     showConfigError('数据库未连接：请在 Vercel → Settings → Environment Variables 配置 VITE_SUPABASE_URL 和 VITE_SUPABASE_KEY，然后 Redeploy。');
     showToast('数据库配置缺失，请检查 Vercel 环境变量', 'error', 5000);
-    switchView(getInitialView());
+    switchView('reading');
+    markRouterReady();
     refreshIcons();
     return;
   }
 
   try {
     await fetchSettings();
-    updateNavVisibility(switchView);
+    updateNavVisibility();
+
+    const initialView = resolveView(state.currentSettings);
+    switchView(initialView);
+    syncHash(initialView);
+
     await Promise.all([fetchMedia(), fetchDecks()]);
-    switchView(getInitialView());
+
+    markRouterReady();
     refreshIcons();
   } catch (err) {
     console.error('[kaiyaa-space] 初始化失败:', err);
