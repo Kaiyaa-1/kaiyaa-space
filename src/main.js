@@ -17,6 +17,9 @@ import {
 } from './ui/forms.js';
 import { copyDeckCode } from './render/decks.js';
 import { state } from './state.js';
+import { isSupabaseConfigured } from './lib/supabase.js';
+import { showConfigError } from './lib/config-error.js';
+import { showToast } from './lib/toast.js';
 
 async function reloadAllData() {
   await fetchSettings();
@@ -88,11 +91,25 @@ async function init() {
   initRouter(switchView);
   initAuth(reloadAllData);
 
-  await fetchSettings();
-  updateNavVisibility(switchView);
-  await Promise.all([fetchMedia(), fetchDecks()]);
-  switchView(getInitialView());
-  refreshIcons();
+  if (!isSupabaseConfigured) {
+    showConfigError('数据库未连接：请在 Vercel → Settings → Environment Variables 配置 VITE_SUPABASE_URL 和 VITE_SUPABASE_KEY，然后 Redeploy。');
+    showToast('数据库配置缺失，请检查 Vercel 环境变量', 'error', 5000);
+    switchView(getInitialView());
+    refreshIcons();
+    return;
+  }
+
+  try {
+    await fetchSettings();
+    updateNavVisibility(switchView);
+    await Promise.all([fetchMedia(), fetchDecks()]);
+    switchView(getInitialView());
+    refreshIcons();
+  } catch (err) {
+    console.error('[kaiyaa-space] 初始化失败:', err);
+    showConfigError(`加载失败：${err?.message || err}`);
+    showToast('页面加载失败，请刷新重试', 'error');
+  }
 }
 
 init();

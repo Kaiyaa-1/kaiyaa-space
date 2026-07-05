@@ -1,11 +1,30 @@
-import { supabase } from '../lib/supabase.js';
+import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
 import { state } from '../state.js';
 
 export async function fetchSettings() {
-  const { data, error } = await supabase.from('site_settings').select('*').eq('id', 1).single();
-  if (!error && data) {
-    state.currentSettings = data;
-  } else {
+  if (!isSupabaseConfigured) {
+    state.currentSettings = {
+      reading_visible: true,
+      watching_visible: true,
+      listening_visible: true,
+      hearthstone_visible: true,
+    };
+    return;
+  }
+
+  try {
+    const { data, error } = await supabase.from('site_settings').select('*').eq('id', 1).single();
+    if (!error && data) {
+      state.currentSettings = data;
+    } else {
+      state.currentSettings = {
+        reading_visible: true,
+        watching_visible: true,
+        listening_visible: true,
+        hearthstone_visible: true,
+      };
+    }
+  } catch {
     state.currentSettings = {
       reading_visible: true,
       watching_visible: true,
@@ -33,7 +52,6 @@ export async function updateSettingDB(column, value) {
 export function updateNavVisibility(switchViewFn) {
   if (!state.currentSettings) return;
 
-  let hasVisibleView = false;
   const views = ['reading', 'watching', 'listening', 'hearthstone'];
 
   views.forEach((v) => {
@@ -43,7 +61,6 @@ export function updateNavVisibility(switchViewFn) {
     if (isVisible) {
       navEl.classList.remove('hidden');
       navEl.classList.add('flex');
-      hasVisibleView = true;
     } else {
       navEl.classList.add('hidden');
       navEl.classList.remove('flex');

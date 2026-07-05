@@ -1,20 +1,34 @@
-import { supabase } from '../lib/supabase.js';
+import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
 import { state } from '../state.js';
 import { renderDecks, showDecksLoading } from '../render/decks.js';
 
+function showDecksError(message) {
+  const container = document.getElementById('list-hearthstone');
+  if (container) container.innerHTML = `<p class="text-red-400 text-xs">加载失败：${message}</p>`;
+}
+
 export async function fetchDecks() {
   showDecksLoading();
-  let query = supabase.from('hearthstone_decks').select('*').order('created_at', { ascending: false });
-  if (!state.isOwnerMode) query = query.eq('is_public', true);
 
-  const { data, error } = await query;
-  if (!error) {
+  if (!isSupabaseConfigured) {
+    showDecksError('未配置数据库，请在 Vercel 填写环境变量后重新部署');
+    return;
+  }
+
+  try {
+    let query = supabase.from('hearthstone_decks').select('*').order('created_at', { ascending: false });
+    if (!state.isOwnerMode) query = query.eq('is_public', true);
+
+    const { data, error } = await query;
+    if (error) {
+      showDecksError(error.message);
+      return;
+    }
+
     state.globalDecksData = data;
     renderDecks(data);
-  } else {
-    const container = document.getElementById('list-hearthstone');
-    if (container) container.innerHTML = `<p class="text-red-400 text-xs">加载失败：${error.message}</p>`;
-    throw error;
+  } catch (err) {
+    showDecksError(err?.message || String(err));
   }
 }
 
