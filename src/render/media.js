@@ -48,7 +48,7 @@ function buildMediaItemHtml(item) {
       : '';
   const urls = parseMediaUrls(item.file_url);
   const fileHtml = buildFileHtml(urls);
-  const emptyHint = state.isOwnerMode ? '暂无记录，按 i 键添加' : '暂无记录';
+  const emptyHint = state.isOwnerMode ? '暂无记录，点击「编辑」添加' : '暂无记录';
 
   const ownerActions = state.isOwnerMode
     ? `
@@ -77,7 +77,7 @@ function buildMediaItemHtml(item) {
 
 export function renderLists(mediaData) {
   const types = ['reading', 'watching', 'listening'];
-  const emptyHint = state.isOwnerMode ? '暂无记录，按 i 键添加' : '暂无记录';
+  const emptyHint = state.isOwnerMode ? '暂无记录，点击「编辑」添加' : '暂无记录';
 
   types.forEach((type) => {
     const ul = document.getElementById(`list-${type}`);

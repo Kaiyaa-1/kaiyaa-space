@@ -1,4 +1,5 @@
 import { state, setOwnerMode } from '../state.js';
+import { updateEditButtonState } from '../ui/sidebar.js';
 import { refreshIcons } from './icons.js';
 import { showToast } from './toast.js';
 import { showModal, hideModal } from './modal.js';
@@ -69,9 +70,16 @@ async function confirmLogout(onAuthChange) {
 
 function updateOwnerUI() {
   const badge = document.getElementById('owner-badge');
+  const editBtn = document.getElementById('edit-toggle-btn');
   if (badge) {
     badge.classList.toggle('hidden', !state.isOwnerMode);
   }
+  if (editBtn) {
+    editBtn.classList.toggle('hidden', !state.isOwnerMode);
+    if (!state.isOwnerMode) editBtn.classList.remove('flex');
+    else editBtn.classList.add('flex');
+  }
+  updateEditButtonState();
   refreshIcons();
 }
 

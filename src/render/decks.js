@@ -45,7 +45,7 @@ function buildDeckHtml(deck) {
       : '';
   const urls = parseMediaUrls(deck.image_url);
   const mediaHtml = buildDeckMediaHtml(urls, deck.deck_name);
-  const emptyHint = state.isOwnerMode ? '酒馆空空如也，按 i 键添加' : '暂无卡组';
+  const emptyHint = state.isOwnerMode ? '酒馆空空如也，点击「编辑」添加' : '暂无卡组';
 
   const ownerActions = state.isOwnerMode
     ? `
@@ -83,7 +83,7 @@ export function renderDecks(decksData) {
   const container = document.getElementById('list-hearthstone');
   if (!container) return;
 
-  const emptyHint = state.isOwnerMode ? '酒馆空空如也，按 i 键添加' : '暂无卡组';
+  const emptyHint = state.isOwnerMode ? '酒馆空空如也，点击「编辑」添加' : '暂无卡组';
 
   if (decksData.length === 0) {
     container.innerHTML = `<p class="text-stone-400 text-xs italic">${emptyHint}</p>`;

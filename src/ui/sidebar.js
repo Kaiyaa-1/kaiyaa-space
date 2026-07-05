@@ -5,6 +5,9 @@ import { navigateToView } from '../lib/router.js';
 export function initSidebar() {
   document.getElementById('sidebar-toggle')?.addEventListener('click', toggleSidebar);
   document.getElementById('sidebar-overlay')?.addEventListener('click', collapseSidebar);
+  document.getElementById('edit-toggle-btn')?.addEventListener('click', () => {
+    if (state.isOwnerMode) toggleAdminPanel();
+  });
 
   document.querySelectorAll('[data-view]').forEach((el) => {
     el.addEventListener('click', (e) => {
@@ -99,10 +102,24 @@ export function switchView(viewId) {
 export function toggleAdminPanel() {
   if (!state.isOwnerMode) return;
   const panel = document.getElementById('admin-panel');
+  const wasHidden = panel?.classList.contains('hidden');
   panel?.classList.toggle('hidden');
   if (panel?.classList.contains('hidden')) {
     resetForms();
+  } else if (wasHidden) {
+    panel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+  updateEditButtonState();
+}
+
+export function updateEditButtonState() {
+  const btn = document.getElementById('edit-toggle-btn');
+  const panel = document.getElementById('admin-panel');
+  if (!btn) return;
+  const isOpen = panel && !panel.classList.contains('hidden');
+  btn.classList.toggle('bg-orange-500', isOpen);
+  btn.classList.toggle('bg-douban', !isOpen);
+  btn.setAttribute('aria-pressed', isOpen ? 'true' : 'false');
 }
 
 export function toggleFormType(type) {
