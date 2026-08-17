@@ -1,303 +1,1284 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Kaiyaa 的个人主页 — 书影音记录与炉石卡组收藏">
-  <title>Kaiyaa 的主页 - 全栈版</title>
-  <script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Kaiyaa 的个人收藏主页：记录读过的书、看过的电影、听过的音乐和炉石卡组。">
+    <meta name="theme-color" content="#f6f6f1">
+    <title>Kaiyaa 的个人收藏主页</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        .sidebar-transition {
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .gpu-accelerate {
+            backface-visibility: hidden;
+        }
+        [data-lucide] {
+            opacity: 1;
+            transition: opacity 0.2s;
+        }
+        .lucide {
+            width: 1.15em;
+            height: 1.15em;
+            display: inline-block;
+            vertical-align: -0.125em;
+        }
+        :focus-visible {
+            outline: 2px solid #00b514;
+            outline-offset: 3px;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                scroll-behavior: auto !important;
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+    </style>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        douban: '#00b514',
+                        doubanLight: '#eef9ee',
+                        doubanBg: '#f6f6f1',
+                        hearthstone: '#f59e0b'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        }
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.4s ease-out forwards',
+                    }
+                }
+            }
+        }
+
+        const SUPABASE_URL = 'https://bwibjnkdfeohwdfdywnd.supabase.co'; 
+        const SUPABASE_KEY = 'sb_publishable_AbPf2W0eZC0ehIoDnzl2Yg_Fpt2cCUw'; 
+        // 在 Supabase Dashboard → Authentication → Users 中复制你的 User UID 并替换下方占位符。
+        const OWNER_USER_ID = '0e8f16f5-f3c6-4416-a9cd-482f3f252500';
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        let currentUser = null;
+        let isOwnerMode = false;
+        let currentSettings = null; 
+        let currentActiveView = 'reading';
+
+        let globalMediaData = [];
+        let globalDecksData = [];
+        
+        let editingMediaId = null;
+        let editingDeckId = null;
+
+        let previewUrls = [];
+        let previewIndex = 0;
+
+        let iconRenderTimeout;
+        let lastFocusedElement = null;
+        const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+        const ALLOWED_UPLOAD_TYPES = new Set([
+            'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif',
+            'video/mp4', 'video/webm', 'video/ogg'
+        ]);
+        const UPLOAD_EXTENSIONS = {
+            'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
+            'image/gif': 'gif', 'image/avif': 'avif', 'video/mp4': 'mp4',
+            'video/webm': 'webm', 'video/ogg': 'ogv'
+        };
+
+        function escapeHTML(value) {
+            return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[char]);
+        }
+
+        function normalizeHttpUrl(value) {
+            try {
+                const url = new URL(String(value));
+                return ['https:', 'http:'].includes(url.protocol) ? url.href : null;
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function openDialog(dialogId, focusId) {
+            const dialog = document.getElementById(dialogId);
+            if (!dialog) return;
+            lastFocusedElement = document.activeElement;
+            dialog.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+            if (focusId) setTimeout(() => document.getElementById(focusId)?.focus(), 50);
+        }
+
+        function closeDialog(dialogId) {
+            const dialog = document.getElementById(dialogId);
+            if (!dialog) return;
+            dialog.classList.add('hidden');
+            document.body.classList.remove('overflow-hidden');
+            if (lastFocusedElement instanceof HTMLElement) lastFocusedElement.focus();
+            lastFocusedElement = null;
+        }
+
+        function requireOwner() {
+            if (isOwnerMode) return true;
+            alert('请先使用站长账号登录。');
+            return false;
+        }
+
+        async function initializeAuth() {
+            const { data, error } = await supabaseClient.auth.getSession();
+            if (error) console.warn('无法读取登录会话。');
+            currentUser = data?.session?.user ?? null;
+            isOwnerMode = Boolean(currentUser && currentUser.id === OWNER_USER_ID);
+
+            if (currentUser && !isOwnerMode) {
+                await supabaseClient.auth.signOut();
+                currentUser = null;
+            }
+
+            const ownerEntryText = document.getElementById('owner-entry-text');
+            if (ownerEntryText) ownerEntryText.textContent = isOwnerMode ? '退出站长模式' : '站长登录';
+        }
+
+        function debouncedRefreshIcons() {
+            clearTimeout(iconRenderTimeout);
+            iconRenderTimeout = setTimeout(() => {
+                if (window.lucide) window.lucide.createIcons();
+            }, 50);
+        }
+
+        function switchView(viewId) {
+            const views = ['reading', 'watching', 'listening', 'hearthstone'];
+            if (!views.includes(viewId)) return;
+            if (!isOwnerMode && currentSettings && !currentSettings[`${viewId}_visible`]) return;
+            currentActiveView = viewId;
+            if (location.hash !== `#${viewId}`) history.replaceState(null, '', `#${viewId}`);
+            
+            views.forEach(v => {
+                // 隐藏所有板块
+                const el = document.getElementById('section-' + v);
+                if(el) {
+                    el.classList.add('hidden');
+                    el.classList.remove('animate-fade-in');
+                }
+                
+                // 重置电脑端菜单状态
+                const navEl = document.getElementById('nav-' + v);
+                if(navEl) {
+                    navEl.classList.remove('bg-stone-50', 'text-douban', 'text-hearthstone');
+                    navEl.classList.add('text-stone-600');
+                    navEl.setAttribute('aria-current', 'false');
+                }
+                
+                // 重置手机端菜单状态
+                const navMobEl = document.getElementById('nav-mob-' + v);
+                if(navMobEl) {
+                    navMobEl.classList.remove('text-douban', 'text-hearthstone');
+                    navMobEl.classList.add('text-stone-600');
+                    navMobEl.setAttribute('aria-current', 'false');
+                }
+            });
+
+            // 显示目标板块
+            const targetEl = document.getElementById('section-' + viewId);
+            if(targetEl) {
+                targetEl.classList.remove('hidden');
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => targetEl.classList.add('animate-fade-in'));
+                });
+            }
+
+            // 激活电脑端菜单
+            const targetNav = document.getElementById('nav-' + viewId);
+            if(targetNav) {
+                targetNav.classList.remove('text-stone-600');
+                targetNav.classList.add('bg-stone-50');
+                if (viewId === 'hearthstone') targetNav.classList.add('text-hearthstone');
+                else targetNav.classList.add('text-douban');
+                targetNav.setAttribute('aria-current', 'page');
+            }
+
+            // 激活手机端菜单
+            const targetMobNav = document.getElementById('nav-mob-' + viewId);
+            if(targetMobNav) {
+                targetMobNav.classList.remove('text-stone-600');
+                if (viewId === 'hearthstone') targetMobNav.classList.add('text-hearthstone');
+                else targetMobNav.classList.add('text-douban');
+                targetMobNav.setAttribute('aria-current', 'page');
+            }
+
+            if (viewId === 'hearthstone') {
+                toggleFormType('hearthstone');
+            } else {
+                toggleFormType('media');
+                document.getElementById('item-type').value = viewId;
+            }
+        }
+
+        function toggleAdminPanel() {
+            if (!isOwnerMode) return;
+            const panel = document.getElementById('admin-panel');
+            panel.classList.toggle('hidden');
+            if(panel.classList.contains('hidden')) resetForms(); 
+        }
+
+        async function uploadFilesToSupabase(fileElementId) {
+            const fileInput = document.getElementById(fileElementId);
+            if (!fileInput.files || fileInput.files.length === 0) return null;
+
+            const files = Array.from(fileInput.files);
+            const invalidFile = files.find((file) => !ALLOWED_UPLOAD_TYPES.has(file.type) || file.size > MAX_UPLOAD_BYTES);
+            if (invalidFile) {
+                alert(`文件“${invalidFile.name}”格式不受支持或超过 25 MB。`);
+                return null;
+            }
+
+            const uploadPromises = files.map(async (file) => {
+                const fileExt = UPLOAD_EXTENSIONS[file.type];
+                const fileName = `${crypto.randomUUID()}.${fileExt}`;
+                const filePath = `public/${fileName}`;
+                const { error } = await supabaseClient.storage.from('uploads').upload(filePath, file);
+                if (error) throw error;
+                return supabaseClient.storage.from('uploads').getPublicUrl(filePath).data.publicUrl;
+            });
+
+            try {
+                const urls = await Promise.all(uploadPromises);
+                return urls.length > 0 ? JSON.stringify(urls) : null;
+            } catch (error) {
+                alert('文件上传失败: ' + error.message);
+                return null;
+            }
+        }
+
+        function parseMediaUrls(urlStr) {
+            if (!urlStr) return [];
+            try {
+                const parsed = JSON.parse(urlStr);
+                return Array.isArray(parsed) ? parsed : [urlStr];
+            } catch (e) {
+                return [urlStr];
+            }
+        }
+
+        async function fetchSettings() {
+            const { data, error } = await supabaseClient.from('site_settings').select('*').eq('id', 1).single();
+            if (!error && data) currentSettings = data;
+            else currentSettings = { reading_visible: true, watching_visible: true, listening_visible: true, hearthstone_visible: true };
+            
+            document.getElementById('set-reading').checked = currentSettings.reading_visible;
+            document.getElementById('set-watching').checked = currentSettings.watching_visible;
+            document.getElementById('set-listening').checked = currentSettings.listening_visible;
+            document.getElementById('set-hearthstone').checked = currentSettings.hearthstone_visible;
+            updateNavVisibility();
+        }
+
+        async function updateSettingDB(column, value) {
+            if (!requireOwner()) return;
+            const { error } = await supabaseClient.from('site_settings').update({ [column]: value }).eq('id', 1);
+            if (error) {
+                alert(`设置保存失败！\n错误详情：${error.message}`);
+                document.getElementById('set-' + column.replace('_visible', '')).checked = !value;
+            } else {
+                fetchSettings(); 
+            }
+        }
+
+        function updateNavVisibility() {
+            if (!currentSettings) return;
+            const views = ['reading', 'watching', 'listening', 'hearthstone'];
+
+            views.forEach(v => {
+                const isVisible = isOwnerMode || currentSettings[`${v}_visible`];
+                
+                const navEl = document.getElementById(`nav-${v}`);
+                if (navEl) isVisible ? navEl.classList.remove('hidden') : navEl.classList.add('hidden');
+
+                const navMobEl = document.getElementById(`nav-mob-${v}`);
+                if (navMobEl) isVisible ? navMobEl.classList.remove('hidden') : navMobEl.classList.add('hidden');
+            });
+
+            if (!isOwnerMode && !currentSettings[`${currentActiveView}_visible`]) {
+                const firstVisible = views.find(v => currentSettings[`${v}_visible`]);
+                if (firstVisible) switchView(firstVisible);
+                else {
+                    const targetSection = document.getElementById(`section-${currentActiveView}`);
+                    if(targetSection) targetSection.classList.add('hidden');
+                }
+            }
+        }
+
+        function secretLogin() {
+            if (isOwnerMode) {
+                openDialog('logout-modal', 'logout-confirm-btn');
+                return;
+            }
+            openDialog('login-modal', 'owner-email');
+            document.getElementById('owner-email').value = '';
+            document.getElementById('secret-pwd').value = ''; 
+            document.getElementById('pwd-error').classList.add('hidden');
+        }
+
+        async function checkPassword() {
+            const email = document.getElementById('owner-email').value.trim();
+            const pwd = document.getElementById('secret-pwd').value;
+            const loginBtn = document.getElementById('login-submit-btn');
+            const errorMsg = document.getElementById('pwd-error');
+
+            if (!email || !pwd) {
+                errorMsg.textContent = '请输入站长邮箱和密码。';
+                errorMsg.classList.remove('hidden');
+                return;
+            }
+
+            loginBtn.disabled = true;
+            loginBtn.textContent = '验证中…';
+            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pwd });
+
+            if (error || data.user?.id !== OWNER_USER_ID) {
+                if (data.user) await supabaseClient.auth.signOut();
+                errorMsg.textContent = error ? '登录失败，请检查邮箱和密码。' : '该账号没有站长权限。';
+                errorMsg.classList.remove('hidden');
+                const modal = document.getElementById('login-modal-content');
+                modal.classList.add('translate-x-2');
+                setTimeout(() => modal.classList.replace('translate-x-2', '-translate-x-2'), 50);
+                setTimeout(() => modal.classList.replace('-translate-x-2', 'translate-x-0'), 100);
+                loginBtn.disabled = false;
+                loginBtn.textContent = '登录';
+                return;
+            }
+
+            location.reload();
+        }
+
+        async function confirmLogout() {
+            await supabaseClient.auth.signOut();
+            location.reload();
+        }
+
+        function toggleFormType(type) {
+            const tabs = ['media', 'hearthstone', 'settings'];
+            tabs.forEach(t => {
+                document.getElementById(`form-${t}`).classList.add('hidden');
+                const tabEl = document.getElementById(`tab-${t}`);
+                tabEl.classList.remove('bg-white', 'shadow-sm', 'text-stone-800');
+                tabEl.classList.add('text-stone-500');
+            });
+
+            document.getElementById(`form-${type}`).classList.remove('hidden');
+            const activeTab = document.getElementById(`tab-${type}`);
+            activeTab.classList.remove('text-stone-500');
+            activeTab.classList.add('bg-white', 'shadow-sm', 'text-stone-800');
+        }
+
+        function resetForms() {
+            editingMediaId = null;
+            editingDeckId = null;
+            
+            document.getElementById('item-title').value = '';
+            document.getElementById('item-author').value = '';
+            document.getElementById('item-comment').value = '';
+            document.getElementById('item-file').value = '';
+            document.getElementById('add-btn').innerText = "添加";
+            document.getElementById('add-btn').classList.replace('bg-orange-500', 'bg-douban');
+
+            document.getElementById('deck-name').value = '';
+            document.getElementById('deck-code').value = '';
+            document.getElementById('deck-desc').value = '';
+            document.getElementById('deck-file').value = '';
+            document.getElementById('deck-add-btn').innerText = "发布卡组";
+            document.getElementById('deck-add-btn').classList.replace('bg-orange-500', 'bg-hearthstone');
+        }
+
+        async function fetchMedia() {
+            let query = supabaseClient.from('media_items').select('*').order('created_at', { ascending: false });
+            if (!isOwnerMode) query = query.eq('is_public', true);
+            
+            const { data, error } = await query;
+            if (!error) {
+                globalMediaData = data;
+                renderLists(data);
+            } else {
+                const types = ['reading', 'watching', 'listening'];
+                types.forEach(type => {
+                    const ul = document.getElementById(`list-${type}`);
+                    if (ul) ul.innerHTML = '<li class="text-red-500 text-xs">内容暂时无法加载，请稍后重试。</li>';
+                });
+            }
+        }
+
+        function linkify(text) {
+            if (!text) return '';
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const source = String(text);
+            let output = '';
+            let cursor = 0;
+
+            for (const match of source.matchAll(urlRegex)) {
+                output += escapeHTML(source.slice(cursor, match.index));
+                const rawUrl = match[0];
+                const safeUrl = normalizeHttpUrl(rawUrl);
+                output += safeUrl
+                    ? `<a href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:text-blue-700 underline underline-offset-2 break-all cursor-pointer">${escapeHTML(rawUrl)}</a>`
+                    : escapeHTML(rawUrl);
+                cursor = match.index + rawUrl.length;
+            }
+
+            return output + escapeHTML(source.slice(cursor));
+        }
+
+        function renderLists(mediaData) {
+            const types = ['reading', 'watching', 'listening'];
+            types.forEach(type => {
+                const ul = document.getElementById(`list-${type}`);
+                if (!ul) return;
+                ul.innerHTML = '';
+                const currentTypeData = mediaData.filter(item => item.type === type);
+                
+                if (currentTypeData.length === 0) {
+                    ul.innerHTML = `<li class="text-stone-400 text-xs italic">暂无记录，按 i 键添加</li>`;
+                } else {
+                    currentTypeData.forEach((item) => {
+                        const itemId = Number(item.id);
+                        const safeTitle = escapeHTML(item.title);
+                        const safeAuthor = escapeHTML(item.author);
+                        const rating = Math.max(1, Math.min(5, Number(item.rating) || 5));
+                        const stars = '★'.repeat(rating) + '☆'.repeat(5 - rating);
+                        const statusTags = {
+                            'wish': { text: '想看', css: 'bg-blue-50 text-blue-600 border-blue-100' },
+                            'doing': { text: '在看', css: 'bg-green-50 text-green-600 border-green-100' },
+                            'collect': { text: '看过', css: 'bg-stone-100 text-stone-600 border-stone-200' }
+                        };
+                        const currentTag = statusTags[item.status] || statusTags['collect'];
+                        const privateBadge = item.is_public === false ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-500 border border-red-100 ml-2 whitespace-nowrap flex items-center gap-1"><i data-lucide="lock" class="w-3 h-3"></i> 仅自己可见</span>` : '';
+
+                        let fileHtml = '';
+                        let urls = parseMediaUrls(item.file_url).map(normalizeHttpUrl).filter(Boolean);
+                        const safeComment = linkify(item.comment || '');
+                        
+                        if (urls.length > 0) {
+                            const firstUrl = urls[0];
+                            const isVid = isVideoUrl(firstUrl);
+                            const encodedUrls = escapeHTML(encodeURIComponent(JSON.stringify(urls)));
+                            const multiPicBadge = urls.length > 1 ? `<div class="absolute top-2 right-2 bg-stone-900/70 text-white text-[10px] px-1.5 py-0.5 rounded backdrop-blur-sm z-10 font-bold flex items-center gap-1"><i data-lucide="images" class="w-3 h-3"></i> ${urls.length}</div>` : '';
+                            
+                            fileHtml = `
+                                <div class="relative max-w-sm mt-3 group/preview cursor-zoom-in">
+                                    ${multiPicBadge}
+                                    <button type="button" class="media-preview-trigger w-full block text-left" data-urls="${encodedUrls}" title="点击放大查看">
+                                        ${isVid 
+                                            ? `<video src="${escapeHTML(firstUrl)}" preload="metadata" class="w-full rounded-md border border-stone-200 shadow-sm pointer-events-none" muted></video>` 
+                                            : `<img src="${escapeHTML(firstUrl)}" loading="lazy" decoding="async" alt="${safeTitle}" class="w-full rounded-md border border-stone-200 shadow-sm object-cover pointer-events-none group-hover/preview:opacity-90 transition">`
+                                        }
+                                    </button>
+                                </div>`;
+                        }
+
+                        ul.innerHTML += `
+                            <li class="border-b border-stone-100 pb-4 hover:bg-stone-50/50 p-3 rounded group transition flex flex-col gap-2">
+                                <div class="flex justify-between items-start gap-4">
+                                    <div class="flex items-center gap-2 flex-wrap flex-1">
+                                        <span class="text-stone-900 font-medium break-words">${safeTitle}</span>
+                                        <span class="text-xs text-stone-500 break-words">/ ${safeAuthor}</span>
+                                        <span class="text-[10px] px-1.5 py-0.5 border rounded whitespace-nowrap ${currentTag.css}">${currentTag.text}</span>
+                                        <span class="text-xs text-amber-500 font-mono whitespace-nowrap">${stars}</span>
+                                        ${privateBadge}
+                                    </div>
+                                </div>
+                                ${item.comment ? `<p class="text-xs text-stone-500 pl-2 bg-stone-50 p-2 rounded border-l-2 border-stone-300 italic whitespace-pre-wrap break-words">“${safeComment}”</p>` : ''}
+                                ${fileHtml}
+                                ${isOwnerMode ? `
+                                <div class="flex gap-3 justify-end mt-1">
+                                    <button onclick="triggerEditMedia(${itemId})" class="flex items-center gap-1 text-xs text-stone-500 hover:text-blue-500 transition px-2 py-1 bg-white rounded border border-stone-200 shadow-sm"><i data-lucide="edit-2" class="w-3 h-3"></i>编辑</button>
+                                    <button onclick="deleteItem(${itemId})" class="flex items-center gap-1 text-xs text-stone-500 hover:text-red-500 transition px-2 py-1 bg-white rounded border border-stone-200 shadow-sm"><i data-lucide="trash-2" class="w-3 h-3"></i>删除</button>
+                                </div>
+                                ` : ''}
+                            </li>
+                        `;
+                    });
+                }
+            });
+            debouncedRefreshIcons();
+        }
+
+        function triggerEditMedia(id) {
+            if (!requireOwner()) return;
+            const item = globalMediaData.find(i => i.id === id);
+            if (!item) return;
+
+            editingMediaId = id;
+            document.getElementById('item-type').value = item.type || 'reading';
+            document.getElementById('item-is-public').value = (item.is_public !== false).toString();
+            document.getElementById('item-title').value = (item.title || '').replace(/《|》/g, '');
+            document.getElementById('item-author').value = item.author || '';
+            document.getElementById('item-status').value = item.status || 'collect';
+            document.getElementById('item-rating').value = String(item.rating ?? 5);
+            document.getElementById('item-comment').value = item.comment || '';
+            document.getElementById('item-file').value = '';
+
+            const btn = document.getElementById('add-btn');
+            btn.innerText = "保存修改";
+            if (btn.classList.contains('bg-douban')) btn.classList.replace('bg-douban', 'bg-orange-500');
+
+            const panel = document.getElementById('admin-panel');
+            if (panel.classList.contains('hidden')) toggleAdminPanel();
+            toggleFormType('media');
+            switchView(item.type || 'reading');
+            panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        async function addItem() {
+            if (!requireOwner()) return;
+            const addBtn = document.getElementById('add-btn');
+            addBtn.innerText = "上传中..."; addBtn.disabled = true;
+
+            const type = document.getElementById('item-type').value;
+            const isPublic = document.getElementById('item-is-public').value === 'true'; 
+            const titleInput = document.getElementById('item-title');
+            const authorInput = document.getElementById('item-author');
+            const statusSelect = document.getElementById('item-status');
+            const ratingSelect = document.getElementById('item-rating');
+            const commentInput = document.getElementById('item-comment');
+
+            const title = titleInput.value.trim();
+            let author = authorInput.value.trim();
+            if (!title) { alert('请输入名称'); addBtn.innerText = editingMediaId ? "保存修改" : "添加"; addBtn.disabled = false; return; }
+            if (!author) author = '未知';
+            const formattedTitle = (type === 'reading' || type === 'watching') && !title.startsWith('《') ? `《${title}》` : title;
+
+            let uploadedFileUrl = null;
+            const hasSelectedFiles = document.getElementById('item-file').files.length > 0;
+            if (hasSelectedFiles) {
+                uploadedFileUrl = await uploadFilesToSupabase('item-file');
+                if (!uploadedFileUrl) {
+                    addBtn.innerText = editingMediaId ? "保存修改" : "添加";
+                    addBtn.disabled = false;
+                    return;
+                }
+            }
+
+            const payload = { 
+                type: type, 
+                title: formattedTitle, 
+                author: author, 
+                status: statusSelect.value, 
+                rating: ratingSelect.value, 
+                comment: commentInput.value.trim(), 
+                is_public: isPublic 
+            };
+
+            if (uploadedFileUrl) payload.file_url = uploadedFileUrl;
+
+            let error;
+            if (editingMediaId) {
+                const res = await supabaseClient.from('media_items').update(payload).eq('id', editingMediaId);
+                error = res.error;
+            } else {
+                const res = await supabaseClient.from('media_items').insert([payload]);
+                error = res.error;
+            }
+
+            if (!error) {
+                resetForms();
+                fetchMedia(); 
+            } else { alert("❌ 云端操作失败！" + error.message); }
+
+            addBtn.innerText = "添加"; addBtn.disabled = false;
+        }
+
+        async function deleteItem(id) {
+            if (!requireOwner()) return;
+            if(confirm("确定彻底删除吗？")) {
+                const { error } = await supabaseClient.from('media_items').delete().eq('id', id);
+                if(!error) fetchMedia(); 
+            }
+        }
+
+        async function fetchDecks() {
+            const container = document.getElementById('list-hearthstone');
+            if(container) container.innerHTML = '<p class="text-stone-400 text-xs">拼命从云端酒馆拉取卡组中...</p>';
+            
+            let query = supabaseClient.from('hearthstone_decks').select('*').order('created_at', { ascending: false });
+            if (!isOwnerMode) query = query.eq('is_public', true);
+
+            const { data, error } = await query;
+            if (!error) {
+                globalDecksData = data;
+                renderDecks(data);
+            } else if (container) {
+                container.innerHTML = '<p class="text-red-500 text-xs">卡组暂时无法加载，请稍后重试。</p>';
+            }
+        }
+
+        function renderDecks(decksData) {
+            const container = document.getElementById('list-hearthstone');
+            if(!container) return;
+            container.innerHTML = '';
+
+            if (decksData.length === 0) {
+                container.innerHTML = `<p class="text-stone-400 text-xs italic">酒馆空空如也，按 i 键添加</p>`;
+                return;
+            }
+
+            const classColors = {
+                '死亡骑士': 'bg-cyan-900 text-cyan-100', '恶魔猎手': 'bg-green-800 text-green-100',
+                '德鲁伊': 'bg-amber-700 text-amber-100', '猎人': 'bg-emerald-700 text-emerald-100',
+                '法师': 'bg-blue-600 text-blue-100', '圣骑士': 'bg-yellow-500 text-yellow-900',
+                '牧师': 'bg-stone-100 text-stone-800 border-stone-300 border', '潜行者': 'bg-stone-800 text-stone-100',
+                '萨满祭司': 'bg-indigo-700 text-indigo-100', '术士': 'bg-purple-800 text-purple-100',
+                '战士': 'bg-red-800 text-red-100'
+            };
+
+            decksData.forEach(deck => {
+                const deckId = Number(deck.id);
+                const deckName = escapeHTML(deck.deck_name);
+                const deckMode = escapeHTML(deck.mode || '标准');
+                const deckClass = escapeHTML(deck.class_name);
+                const deckCode = escapeHTML(deck.deck_code);
+                const encodedDeckCode = escapeHTML(encodeURIComponent(deck.deck_code || ''));
+                const badgeStyle = classColors[deck.class_name] || 'bg-stone-200 text-stone-800';
+                const privateBadge = deck.is_public === false ? `<span class="text-[10px] px-2 py-0.5 rounded shadow-sm whitespace-nowrap bg-red-50 text-red-500 border border-red-200 ml-1 flex items-center gap-1"><i data-lucide="lock" class="w-3 h-3"></i> 私有</span>` : '';
+                const safeDesc = linkify(deck.description || '这套卡组没有留下简介...');
+
+                let mediaHtml = '';
+                let urls = parseMediaUrls(deck.image_url).map(normalizeHttpUrl).filter(Boolean);
+
+                if (urls.length > 0) {
+                    const firstUrl = urls[0];
+                    const isVid = isVideoUrl(firstUrl);
+                    const encodedUrls = escapeHTML(encodeURIComponent(JSON.stringify(urls)));
+                    const multiPicBadge = urls.length > 1 ? `<div class="absolute top-1 right-1 bg-stone-900/70 text-white text-[9px] px-1.5 py-0.5 rounded backdrop-blur-sm z-10 font-bold flex items-center gap-1"><i data-lucide="images" class="w-2.5 h-2.5"></i> ${urls.length}</div>` : '';
+
+                    mediaHtml = `
+                        <div class="relative w-full h-32 sm:w-32 sm:h-32 flex-shrink-0 cursor-zoom-in group/preview mb-3 sm:mb-0">
+                            ${multiPicBadge}
+                            <button type="button" class="media-preview-trigger w-full h-full block" data-urls="${encodedUrls}" title="点击放大查看">
+                                ${isVid 
+                                    ? `<video src="${escapeHTML(firstUrl)}" preload="metadata" class="w-full h-full object-cover rounded-md shadow-sm border border-stone-200 pointer-events-none" muted></video>`
+                                    : `<img src="${escapeHTML(firstUrl)}" loading="lazy" decoding="async" alt="${deckName}" class="w-full h-full object-cover object-top sm:object-cover rounded-md shadow-sm border border-stone-200 pointer-events-none group-hover/preview:ring-2 group-hover/preview:ring-hearthstone/50 transition">`
+                                }
+                            </button>
+                        </div>`;
+                }
+
+                container.innerHTML += `
+                    <div class="flex flex-col sm:flex-row gap-0 sm:gap-4 p-4 border border-stone-200 rounded-lg bg-stone-50/50 hover:shadow-md transition">
+                        ${mediaHtml}
+                        <div class="flex-1 min-w-0 flex flex-col justify-between">
+                            <div>
+                                <div class="flex justify-between items-start gap-2 mb-2">
+                                    <h4 class="font-bold text-stone-900 break-words text-base leading-tight">${deckName}</h4>
+                                    <div class="flex gap-1 flex-wrap justify-end">
+                                        <span class="text-[10px] px-2 py-0.5 rounded shadow-sm whitespace-nowrap bg-stone-100 text-stone-600 border border-stone-200">${deckMode}</span>
+                                        <span class="text-[10px] px-2 py-0.5 rounded shadow-sm whitespace-nowrap ${badgeStyle}">${deckClass}</span>
+                                        ${privateBadge}
+                                    </div>
+                                </div>
+                                <p class="text-xs text-stone-500 mt-1 whitespace-pre-wrap break-words">${safeDesc}</p>
+                            </div>
+                            
+                            <div class="mt-4 flex flex-col sm:flex-row gap-2 sm:items-center">
+                                <input type="text" value="${deckCode}" readonly aria-label="炉石卡组代码" class="text-xs border border-stone-300 p-2 sm:p-1.5 rounded w-full bg-white text-stone-600 focus:outline-none focus:border-hearthstone">
+                                <button type="button" data-code="${encodedDeckCode}" class="copy-code-btn flex items-center justify-center gap-1 whitespace-nowrap text-xs bg-stone-800 text-white px-3 py-2 sm:py-1.5 rounded hover:bg-stone-700 transition active:scale-95 text-center"><i data-lucide="copy" class="w-3 h-3"></i>复制代码</button>
+                            </div>
+
+                            ${isOwnerMode ? `
+                            <div class="flex gap-3 justify-end mt-3 pt-3 border-t border-stone-200/60">
+                                <button onclick="triggerEditDeck(${deckId})" class="flex items-center gap-1 text-xs text-stone-500 hover:text-blue-500 transition px-2 py-1 bg-white rounded border border-stone-200 shadow-sm"><i data-lucide="edit-2" class="w-3 h-3"></i>编辑</button>
+                                <button onclick="deleteDeck(${deckId})" class="flex items-center gap-1 text-xs text-stone-500 hover:text-red-500 transition px-2 py-1 bg-white rounded border border-stone-200 shadow-sm"><i data-lucide="trash-2" class="w-3 h-3"></i>删除</button>
+                            </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            debouncedRefreshIcons();
+        }
+
+        function triggerEditDeck(id) {
+            if (!requireOwner()) return;
+            const deck = globalDecksData.find(d => d.id === id);
+            if (!deck) return;
+
+            editingDeckId = id;
+            document.getElementById('deck-class').value = deck.class_name || '法师';
+            document.getElementById('deck-mode').value = deck.mode || '标准';
+            document.getElementById('deck-is-public').value = (deck.is_public !== false).toString();
+            document.getElementById('deck-name').value = deck.deck_name || '';
+            document.getElementById('deck-code').value = deck.deck_code || '';
+            document.getElementById('deck-desc').value = deck.description || '';
+            document.getElementById('deck-file').value = '';
+
+            const btn = document.getElementById('deck-add-btn');
+            btn.innerText = "保存卡组修改";
+            if (btn.classList.contains('bg-hearthstone')) btn.classList.replace('bg-hearthstone', 'bg-orange-500');
+
+            const panel = document.getElementById('admin-panel');
+            if (panel.classList.contains('hidden')) toggleAdminPanel();
+            toggleFormType('hearthstone');
+            switchView('hearthstone');
+            panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        async function addDeck() {
+            if (!requireOwner()) return;
+            const addBtn = document.getElementById('deck-add-btn');
+            addBtn.innerText = "上传资源中..."; addBtn.disabled = true;
+
+            const className = document.getElementById('deck-class').value;
+            const modeName = document.getElementById('deck-mode').value;
+            const isPublic = document.getElementById('deck-is-public').value === 'true'; 
+            const deckName = document.getElementById('deck-name').value.trim();
+            const deckCode = document.getElementById('deck-code').value.trim();
+            const description = document.getElementById('deck-desc').value.trim();
+
+            if (!deckName || !deckCode) { 
+                alert('名称和代码是必填的哦！'); 
+                addBtn.innerText = editingDeckId ? "保存卡组修改" : "发布卡组"; addBtn.disabled = false; 
+                return; 
+            }
+
+            let uploadedFileUrl = null;
+            const hasSelectedFiles = document.getElementById('deck-file').files.length > 0;
+            if (hasSelectedFiles) {
+                uploadedFileUrl = await uploadFilesToSupabase('deck-file');
+                if (!uploadedFileUrl) {
+                    addBtn.innerText = editingDeckId ? "保存修改" : "发布卡组";
+                    addBtn.disabled = false;
+                    return;
+                }
+            }
+
+            const payload = { 
+                class_name: className, 
+                deck_name: deckName, 
+                deck_code: deckCode, 
+                description: description, 
+                mode: modeName, 
+                is_public: isPublic 
+            };
+
+            if (uploadedFileUrl) payload.image_url = uploadedFileUrl;
+
+            let error;
+            if (editingDeckId) {
+                const res = await supabaseClient.from('hearthstone_decks').update(payload).eq('id', editingDeckId);
+                error = res.error;
+            } else {
+                const res = await supabaseClient.from('hearthstone_decks').insert([payload]);
+                error = res.error;
+            }
+
+            if (!error) {
+                resetForms();
+                fetchDecks(); 
+            } else { alert("❌ 上传失败！" + error.message); }
+
+            addBtn.innerText = "发布卡组"; addBtn.disabled = false;
+        }
+
+        async function deleteDeck(id) {
+            if (!requireOwner()) return;
+            if(confirm("确定撕毁卡组吗？")) {
+                const { error } = await supabaseClient.from('hearthstone_decks').delete().eq('id', id);
+                if(!error) fetchDecks(); 
+            }
+        }
+
+        function copyCode(btnElement, code) {
+            navigator.clipboard.writeText(code).then(() => {
+                const originalHtml = btnElement.innerHTML;
+                btnElement.innerHTML = `<i data-lucide="check" class="w-3 h-3"></i>已复制`;
+                debouncedRefreshIcons();
+                btnElement.classList.replace("bg-stone-800", "bg-hearthstone");
+                setTimeout(() => {
+                    btnElement.innerHTML = originalHtml;
+                    debouncedRefreshIcons();
+                    btnElement.classList.replace("bg-hearthstone", "bg-stone-800");
+                }, 2000);
+            }).catch(() => {
+                alert('复制失败，请手动选择卡组代码。');
+            });
+        }
+
+        function isVideoUrl(url) {
+            return /\.(mp4|webm|ogg)(\?.*)?$/i.test(url || '');
+        }
+
+        function openMediaPreview(urlsJsonStr) {
+            if (!urlsJsonStr) return;
+            try {
+                previewUrls = JSON.parse(decodeURIComponent(urlsJsonStr));
+            } catch (_) {
+                previewUrls = [];
+            }
+            if (previewUrls.length === 0) return;
+            
+            previewIndex = 0;
+            updatePreviewContent();
+
+            const modal = document.getElementById('media-preview-modal');
+            const prevBtn = document.getElementById('media-prev-btn');
+            const nextBtn = document.getElementById('media-next-btn');
+            const counter = document.getElementById('media-preview-counter');
+
+            if (previewUrls.length > 1) {
+                prevBtn.classList.remove('hidden');
+                nextBtn.classList.remove('hidden');
+                counter.classList.remove('hidden');
+            } else {
+                prevBtn.classList.add('hidden');
+                nextBtn.classList.add('hidden');
+                counter.classList.add('hidden');
+            }
+
+            lastFocusedElement = document.activeElement;
+            modal.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+            document.getElementById('media-preview-close')?.focus();
+        }
+
+        function updatePreviewContent() {
+            const url = previewUrls[previewIndex];
+            const isVideo = isVideoUrl(url);
+            
+            const img = document.getElementById('media-preview-img');
+            const video = document.getElementById('media-preview-video');
+            const counter = document.getElementById('media-preview-counter');
+
+            img.classList.add('hidden');
+            img.removeAttribute('src');
+            video.classList.add('hidden');
+            video.pause();
+            video.removeAttribute('src');
+
+            if (isVideo) {
+                video.src = url;
+                video.classList.remove('hidden');
+            } else {
+                img.src = url;
+                img.classList.remove('hidden');
+            }
+
+            if (previewUrls.length > 1) {
+                counter.innerText = `${previewIndex + 1} / ${previewUrls.length}`;
+            }
+        }
+
+        function navigatePreview(dir) {
+            previewIndex += dir;
+            if (previewIndex < 0) previewIndex = previewUrls.length - 1;
+            if (previewIndex >= previewUrls.length) previewIndex = 0;
+            updatePreviewContent();
+        }
+
+        function closeMediaPreview() {
+            const modal = document.getElementById('media-preview-modal');
+            const video = document.getElementById('media-preview-video');
+            modal.classList.add('hidden');
+            video.pause();
+            video.removeAttribute('src');
+            document.body.classList.remove('overflow-hidden');
+            previewUrls = [];
+            if (lastFocusedElement instanceof HTMLElement) lastFocusedElement.focus();
+            lastFocusedElement = null;
+        }
+
+        document.addEventListener('click', (e) => {
+            const trigger = e.target.closest('.media-preview-trigger');
+            if (trigger) {
+                e.preventDefault();
+                openMediaPreview(trigger.dataset.urls);
+                return;
+            }
+
+            const copyButton = e.target.closest('.copy-code-btn');
+            if (copyButton) copyCode(copyButton, decodeURIComponent(copyButton.dataset.code || ''));
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+            
+            const previewModal = document.getElementById('media-preview-modal');
+            const isPreviewOpen = previewModal && !previewModal.classList.contains('hidden');
+            
+            if (isPreviewOpen) {
+                if (e.key === 'Escape') closeMediaPreview();
+                if (e.key === 'ArrowLeft') navigatePreview(-1);
+                if (e.key === 'ArrowRight') navigatePreview(1);
+                return;
+            }
+
+            if (e.key.toLowerCase() === 'i') {
+                e.preventDefault();
+                if (isOwnerMode) toggleAdminPanel();
+            }
+            
+            if (e.key === 'Escape') {
+                const loginModal = document.getElementById('login-modal');
+                const logoutModal = document.getElementById('logout-modal');
+                if (loginModal && !loginModal.classList.contains('hidden')) {
+                    closeDialog('login-modal');
+                    return;
+                }
+                if (logoutModal && !logoutModal.classList.contains('hidden')) {
+                    closeDialog('logout-modal');
+                    return;
+                }
+                const adminPanel = document.getElementById('admin-panel');
+                if(adminPanel && !adminPanel.classList.contains('hidden')) {
+                    toggleAdminPanel(); 
+                }
+            }
+        });
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            await initializeAuth();
+            await Promise.all([fetchSettings(), fetchMedia(), fetchDecks()]);
+            const requestedView = location.hash.replace('#', '');
+            const knownViews = ['reading', 'watching', 'listening', 'hearthstone'];
+            const fallbackView = knownViews.find((view) => isOwnerMode || currentSettings?.[`${view}_visible`]);
+            const initialView = knownViews.includes(requestedView) && (isOwnerMode || currentSettings?.[`${requestedView}_visible`])
+                ? requestedView
+                : fallbackView;
+            if (initialView) switchView(initialView);
+            debouncedRefreshIcons(); 
+        });
+
+        window.addEventListener('hashchange', () => {
+            const requestedView = location.hash.replace('#', '');
+            switchView(requestedView);
+        });
+    </script>
 </head>
-<body class="bg-doubanBg text-stone-800 font-sans antialiased min-h-screen py-10 pr-4 pl-16 body-pl-transition">
+<!-- 🚀 关键适配：为手机端留出底部空间 pb-[calc(4.5rem+env(safe-area-inset-bottom))]，电脑端恢复正常 md:pb-10，调整左右内边距适配 -->
+<body class="bg-doubanBg text-stone-800 font-sans antialiased min-h-screen pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-10 pt-4 md:pt-10 pr-4 pl-4 md:pl-[80px] sidebar-transition">
 
-  <div id="sidebar-overlay" class="hidden fixed inset-0 bg-stone-900/40 z-40 sm:hidden"></div>
+    <!-- ==================== 左侧伸缩导航栏 (仅电脑端显示 md:flex) ==================== -->
+    <nav id="left-sidebar" class="hidden md:flex flex-col fixed left-0 top-0 h-full bg-white border-r border-stone-200 shadow-[2px_0_10px_rgba(0,0,0,0.02)] z-50 overflow-hidden sidebar-transition w-16 hover:w-48 group">
+        <div class="p-4 border-b border-stone-100 flex items-center h-[73px] flex-shrink-0 cursor-default">
+            <i data-lucide="menu" class="w-7 h-7 text-stone-600 min-w-[28px]"></i>
+            <span class="ml-4 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 font-bold text-stone-800 tracking-tight">Kaiyaa</span>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto py-4 flex flex-col space-y-2">
+            <button id="nav-reading" type="button" aria-controls="section-reading" aria-current="false" onclick="switchView('reading')" class="w-full flex items-center px-4 py-3 text-stone-600 hover:bg-stone-50 hover:text-douban transition">
+                <i data-lucide="book-open" class="min-w-[28px] mx-auto transition-transform"></i>
+                <span class="ml-4 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 font-medium">我读</span>
+            </button>
+            <button id="nav-watching" type="button" aria-controls="section-watching" aria-current="false" onclick="switchView('watching')" class="w-full flex items-center px-4 py-3 text-stone-600 hover:bg-stone-50 hover:text-douban transition">
+                <i data-lucide="film" class="min-w-[28px] mx-auto transition-transform"></i>
+                <span class="ml-4 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 font-medium">我看</span>
+            </button>
+            <button id="nav-listening" type="button" aria-controls="section-listening" aria-current="false" onclick="switchView('listening')" class="w-full flex items-center px-4 py-3 text-stone-600 hover:bg-stone-50 hover:text-douban transition">
+                <i data-lucide="music" class="min-w-[28px] mx-auto transition-transform"></i>
+                <span class="ml-4 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 font-medium">我听</span>
+            </button>
+            <button id="nav-hearthstone" type="button" aria-controls="section-hearthstone" aria-current="false" onclick="switchView('hearthstone')" class="w-full flex items-center px-4 py-3 text-stone-600 hover:bg-stone-50 hover:text-hearthstone transition">
+                <i data-lucide="swords" class="min-w-[28px] mx-auto transition-transform"></i>
+                <span class="ml-4 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 font-medium">炉石酒馆</span>
+            </button>
+        </div>
+    </nav>
 
-  <nav id="left-sidebar" class="fixed left-0 top-0 h-full bg-white border-r border-stone-200 shadow-[2px_0_10px_rgba(0,0,0,0.02)] z-50 flex flex-col overflow-hidden sidebar-transition w-16">
-    <div id="sidebar-toggle" class="p-4 border-b border-stone-100 flex items-center h-[73px] flex-shrink-0 cursor-pointer hover:bg-stone-50 transition">
-      <i data-lucide="menu" class="w-7 h-7 text-stone-600 min-w-[28px]"></i>
-    </div>
-
-    <div class="flex-1 overflow-y-auto py-4 flex flex-col space-y-2">
-      <a id="nav-reading" data-view="reading" href="#reading" class="flex items-center px-4 py-3 text-stone-600 hover:bg-stone-50 hover:text-douban transition group">
-        <i data-lucide="book-open" class="min-w-[28px] mx-auto group-hover:scale-110 transition-transform"></i>
-        <span class="ml-4 whitespace-nowrap opacity-0 [.is-expanded_&]:opacity-100 transition-opacity duration-300 font-medium">我读</span>
-      </a>
-      <a id="nav-watching" data-view="watching" href="#watching" class="flex items-center px-4 py-3 text-stone-600 hover:bg-stone-50 hover:text-douban transition group">
-        <i data-lucide="film" class="min-w-[28px] mx-auto group-hover:scale-110 transition-transform"></i>
-        <span class="ml-4 whitespace-nowrap opacity-0 [.is-expanded_&]:opacity-100 transition-opacity duration-300 font-medium">我看</span>
-      </a>
-      <a id="nav-listening" data-view="listening" href="#listening" class="flex items-center px-4 py-3 text-stone-600 hover:bg-stone-50 hover:text-douban transition group">
-        <i data-lucide="music" class="min-w-[28px] mx-auto group-hover:scale-110 transition-transform"></i>
-        <span class="ml-4 whitespace-nowrap opacity-0 [.is-expanded_&]:opacity-100 transition-opacity duration-300 font-medium">我听</span>
-      </a>
-      <a id="nav-hearthstone" data-view="hearthstone" href="#hearthstone" class="flex items-center px-4 py-3 text-stone-600 hover:bg-stone-50 hover:text-hearthstone transition group">
-        <i data-lucide="swords" class="min-w-[28px] mx-auto group-hover:scale-110 transition-transform"></i>
-        <span class="ml-4 whitespace-nowrap opacity-0 [.is-expanded_&]:opacity-100 transition-opacity duration-300 font-medium">炉石</span>
-      </a>
-    </div>
-  </nav>
-
-  <div class="max-w-[1000px] mx-auto bg-white p-4 sm:p-8 shadow-sm border border-stone-200 rounded">
-    <div class="flex items-center justify-between border-b border-dashed border-stone-200 pb-6 mb-8">
-      <div class="flex items-baseline gap-4 flex-wrap">
-        <h1 class="text-2xl font-bold text-stone-900">Kaiyaa 的主页</h1>
-        <span id="owner-badge" class="hidden text-[10px] px-2 py-0.5 rounded-full bg-douban/10 text-douban border border-douban/20 font-medium">站长模式</span>
-        <button id="edit-toggle-btn" type="button" class="hidden text-xs text-white bg-douban px-2.5 py-1 rounded-md hover:opacity-90 transition flex items-center gap-1 shadow-sm" title="打开编辑面板（电脑端也可按 i 键）">
-          <i data-lucide="pen-line" class="w-3 h-3"></i> 编辑
+    <!-- ==================== 手机端底部导航栏 (仅手机端显示 md:hidden) ==================== -->
+    <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 w-full bg-white/95 backdrop-blur-md border-t border-stone-200 z-50 flex justify-around items-center pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+        <button id="nav-mob-reading" type="button" aria-controls="section-reading" aria-current="false" onclick="switchView('reading')" class="flex flex-1 min-h-11 flex-col items-center justify-center text-stone-600 transition">
+            <i data-lucide="book-open" class="w-5 h-5 mb-1"></i>
+            <span class="text-[10px] font-medium">我读</span>
         </button>
-        <button id="secret-login-btn" type="button" class="text-xs text-stone-400 cursor-pointer hover:text-stone-600 transition flex items-center gap-1" title="嘘... 这里有个隐藏入口">
-          <i data-lucide="user-cog" class="w-3 h-3"></i> 站长入口
+        <button id="nav-mob-watching" type="button" aria-controls="section-watching" aria-current="false" onclick="switchView('watching')" class="flex flex-1 min-h-11 flex-col items-center justify-center text-stone-600 transition">
+            <i data-lucide="film" class="w-5 h-5 mb-1"></i>
+            <span class="text-[10px] font-medium">我看</span>
         </button>
-      </div>
-    </div>
+        <button id="nav-mob-listening" type="button" aria-controls="section-listening" aria-current="false" onclick="switchView('listening')" class="flex flex-1 min-h-11 flex-col items-center justify-center text-stone-600 transition">
+            <i data-lucide="music" class="w-5 h-5 mb-1"></i>
+            <span class="text-[10px] font-medium">我听</span>
+        </button>
+        <button id="nav-mob-hearthstone" type="button" aria-controls="section-hearthstone" aria-current="false" onclick="switchView('hearthstone')" class="flex flex-1 min-h-11 flex-col items-center justify-center text-stone-600 transition">
+            <i data-lucide="swords" class="w-5 h-5 mb-1"></i>
+            <span class="text-[10px] font-medium">炉石</span>
+        </button>
+    </nav>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-10">
-      <div class="lg:col-span-2 relative min-h-[400px]">
-        <div id="section-reading" class="view-section hidden">
-          <div class="border-b border-stone-200 pb-1.5 mb-4 flex items-center gap-2">
-            <i data-lucide="book-open" class="text-douban w-4 h-4"></i>
-            <h2 class="text-base font-medium text-douban">我的书单</h2>
-          </div>
-          <ul id="list-reading" class="space-y-4 text-sm"></ul>
-        </div>
-
-        <div id="section-watching" class="view-section hidden">
-          <div class="border-b border-stone-200 pb-1.5 mb-4 flex items-center gap-2">
-            <i data-lucide="film" class="text-douban w-4 h-4"></i>
-            <h2 class="text-base font-medium text-douban">我的电影圈</h2>
-          </div>
-          <ul id="list-watching" class="space-y-4 text-sm"></ul>
-        </div>
-
-        <div id="section-listening" class="view-section hidden">
-          <div class="border-b border-stone-200 pb-1.5 mb-4 flex items-center gap-2">
-            <i data-lucide="music" class="text-douban w-4 h-4"></i>
-            <h2 class="text-base font-medium text-douban">我的音乐盒</h2>
-          </div>
-          <ul id="list-listening" class="space-y-4 text-sm"></ul>
-        </div>
-
-        <div id="section-hearthstone" class="view-section hidden pb-10">
-          <div class="border-b border-stone-200 pb-1.5 mb-4 flex justify-between items-end">
-            <div class="flex items-center gap-2">
-              <i data-lucide="swords" class="text-hearthstone w-5 h-5"></i>
-              <h2 class="text-lg font-bold text-hearthstone">炉石酒馆卡组收藏</h2>
+    <!-- ==================== 主体内容区域 ==================== -->
+    <div class="max-w-[1000px] mx-auto bg-white p-4 md:p-8 shadow-sm border border-stone-200 rounded gpu-accelerate">
+        
+        <div class="flex items-center justify-between border-b border-dashed border-stone-200 pb-4 md:pb-6 mb-6 md:mb-8">
+            <div class="flex items-baseline gap-2 md:gap-4">
+                <h1 class="text-xl md:text-2xl font-bold text-stone-900 tracking-tight">Kaiyaa 的主页</h1>
+                <button type="button" onclick="secretLogin()" class="text-[11px] md:text-xs text-stone-500 cursor-pointer hover:text-stone-700 transition flex items-center gap-1 rounded" title="站长登录"><i data-lucide="user-cog" class="w-3 h-3"></i> <span id="owner-entry-text">站长登录</span></button>
             </div>
-            <span class="text-xs text-stone-400">各职业精选构筑</span>
-          </div>
-          <div id="list-hearthstone" class="grid grid-cols-1 gap-4"></div>
         </div>
-      </div>
 
-      <div class="space-y-8 border-t lg:border-t-0 lg:border-l border-stone-200 pt-8 lg:pt-0 lg:pl-8">
-        <div id="admin-panel" class="hidden bg-stone-50 p-1 rounded-lg border border-stone-200 text-xs shadow-xl animate-fade-in sticky top-8 z-40">
-          <div class="flex p-1 bg-stone-100 rounded-md mb-4 relative">
-            <button id="tab-media" type="button" class="flex-1 py-1.5 text-center font-bold rounded bg-white shadow-sm text-stone-800 transition flex items-center justify-center gap-1"><i data-lucide="library" class="w-3 h-3"></i> 书影音</button>
-            <button id="tab-hearthstone" type="button" class="flex-1 py-1.5 text-center font-bold rounded text-stone-500 hover:text-stone-700 transition flex items-center justify-center gap-1"><i data-lucide="swords" class="w-3 h-3"></i> 炉石</button>
-            <button id="tab-settings" type="button" class="flex-1 py-1.5 text-center font-bold rounded text-stone-500 hover:text-stone-700 transition flex items-center justify-center gap-1"><i data-lucide="settings" class="w-3 h-3"></i> 设置</button>
-            <button id="admin-close" type="button" class="absolute -top-3 -right-3 bg-white border border-stone-200 rounded-full w-6 h-6 flex items-center justify-center text-stone-400 hover:text-stone-700 shadow-sm"><i data-lucide="x" class="w-3 h-3"></i></button>
-          </div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 md:gap-10">
+            
+            <div class="lg:col-span-2 relative min-h-[400px]">
+                
+                <div id="section-reading" class="view-section hidden">
+                    <div class="border-b border-stone-200 pb-1.5 mb-4 flex items-center gap-2">
+                        <i data-lucide="book-open" class="text-douban w-4 h-4"></i>
+                        <h2 class="text-base font-medium text-douban">我的书单</h2>
+                    </div>
+                    <ul id="list-reading" class="space-y-4 text-sm"></ul>
+                </div>
+                
+                <div id="section-watching" class="view-section hidden">
+                    <div class="border-b border-stone-200 pb-1.5 mb-4 flex items-center gap-2">
+                        <i data-lucide="film" class="text-douban w-4 h-4"></i>
+                        <h2 class="text-base font-medium text-douban">我的电影圈</h2>
+                    </div>
+                    <ul id="list-watching" class="space-y-4 text-sm"></ul>
+                </div>
+                
+                <div id="section-listening" class="view-section hidden">
+                    <div class="border-b border-stone-200 pb-1.5 mb-4 flex items-center gap-2">
+                        <i data-lucide="music" class="text-douban w-4 h-4"></i>
+                        <h2 class="text-base font-medium text-douban">我的音乐盒</h2>
+                    </div>
+                    <ul id="list-listening" class="space-y-4 text-sm"></ul>
+                </div>
 
-          <div class="p-3 pt-0">
-            <div id="form-media" class="space-y-3">
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <label class="block text-stone-400 mb-1">类别</label>
-                  <select id="item-type" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
-                    <option value="reading">读书</option>
-                    <option value="watching">电影</option>
-                    <option value="listening">音乐</option>
-                  </select>
+                <div id="section-hearthstone" class="view-section hidden pb-10">
+                    <div class="border-b border-stone-200 pb-1.5 mb-4 flex justify-between items-end">
+                        <div class="flex items-center gap-2">
+                            <i data-lucide="swords" class="text-hearthstone w-5 h-5"></i>
+                            <h2 class="text-lg font-bold text-hearthstone">炉石酒馆卡组收藏</h2>
+                        </div>
+                        <span class="text-xs text-stone-400">各职业精选构筑</span>
+                    </div>
+                    <div id="list-hearthstone" class="grid grid-cols-1 gap-4"></div>
                 </div>
-                <div>
-                  <label class="block text-stone-400 mb-1">可见性</label>
-                  <select id="item-is-public" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-bold text-stone-700">
-                    <option value="true">公开 (访客可见)</option>
-                    <option value="false">私密 (仅自己可见)</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label class="block text-stone-400 mb-1">名称</label>
-                <input type="text" id="item-title" placeholder="作品名称" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
-              </div>
-              <div class="grid grid-cols-3 gap-2 items-end">
-                <div class="col-span-2">
-                  <label class="block text-stone-400 mb-1">作者/导演</label>
-                  <input type="text" id="item-author" placeholder="作者名" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
-                </div>
-                <div>
-                  <label class="block text-stone-400 mb-1">状态</label>
-                  <select id="item-status" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
-                    <option value="collect">看过</option>
-                    <option value="doing">在看</option>
-                    <option value="wish">想看</option>
-                  </select>
-                </div>
-              </div>
-              <div class="grid grid-cols-3 gap-2 items-end">
-                <div class="col-span-1">
-                  <label class="block text-stone-400 mb-1">评分</label>
-                  <select id="item-rating" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none text-amber-500 font-bold">
-                    <option value="5">★★★★★</option>
-                    <option value="4">★★★★☆</option>
-                    <option value="3">★★★☆☆</option>
-                    <option value="2">★★☆☆☆</option>
-                    <option value="1">★☆☆☆☆</option>
-                  </select>
-                </div>
-                <div class="col-span-2">
-                  <label class="block text-stone-400 mb-1">简短评论 (可选)</label>
-                  <input type="text" id="item-comment" placeholder="一句话说说想法..." class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
-                </div>
-              </div>
-              <div>
-                <label class="block text-stone-400 mb-1">上传文件 (支持多图, 可选)</label>
-                <input type="file" id="item-file" accept="image/*,video/*" multiple class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none text-xs">
-              </div>
-              <div class="flex gap-2 mt-2">
-                <button id="reset-media-btn" type="button" class="w-1/3 bg-stone-200 text-stone-600 py-2 rounded font-medium hover:bg-stone-300 transition">清空</button>
-                <button id="add-btn" type="button" class="w-2/3 bg-douban text-white py-2 rounded font-medium hover:opacity-90 transition">添加</button>
-              </div>
+
             </div>
 
-            <div id="form-hearthstone" class="space-y-3 hidden">
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <label class="block text-stone-400 mb-1">职业</label>
-                  <select id="deck-class" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-bold text-stone-700 text-xs">
-                    <option value="死亡骑士">死亡骑士</option>
-                    <option value="恶魔猎手">恶魔猎手</option>
-                    <option value="德鲁伊">德鲁伊</option>
-                    <option value="猎人">猎人</option>
-                    <option value="法师">法师</option>
-                    <option value="圣骑士">圣骑士</option>
-                    <option value="牧师">牧师</option>
-                    <option value="潜行者">潜行者</option>
-                    <option value="萨满祭司">萨满祭司</option>
-                    <option value="术士">术士</option>
-                    <option value="战士">战士</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-stone-400 mb-1">可见性</label>
-                  <select id="deck-is-public" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-bold text-stone-700 text-xs">
-                    <option value="true">公开</option>
-                    <option value="false">私密</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label class="block text-stone-400 mb-1">卡组名称 <span class="text-red-400">*</span></label>
-                <input type="text" id="deck-name" placeholder="如: 宇宙战" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
-              </div>
-              <div class="grid grid-cols-3 gap-2">
-                <div>
-                  <label class="block text-stone-400 mb-1">模式</label>
-                  <select id="deck-mode" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-bold text-stone-700 text-xs">
-                    <option value="标准">标准</option>
-                    <option value="狂野">狂野</option>
-                    <option value="竞技场">竞技场</option>
-                    <option value="其他">其他</option>
-                  </select>
-                </div>
-                <div class="col-span-2">
-                  <label class="block text-stone-400 mb-1">代码 <span class="text-red-400">*</span></label>
-                  <input type="text" id="deck-code" placeholder="AAECAQ..." class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-mono text-[10px]">
-                </div>
-              </div>
-              <div>
-                <label class="block text-stone-400 mb-1">上传文件 (支持多图, 可选)</label>
-                <input type="file" id="deck-file" accept="image/*,video/*" multiple class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none text-xs">
-              </div>
-              <div>
-                <label class="block text-stone-400 mb-1">卡组简介 (可选)</label>
-                <textarea id="deck-desc" placeholder="说说这套卡组的优劣势或起手留牌..." class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none resize-none" rows="2"></textarea>
-              </div>
-              <div class="flex gap-2 mt-2">
-                <button id="reset-deck-btn" type="button" class="w-1/3 bg-stone-200 text-stone-600 py-2 rounded font-bold hover:bg-stone-300 transition shadow-sm">清空</button>
-                <button id="deck-add-btn" type="button" class="w-2/3 bg-hearthstone text-white py-2 rounded font-bold hover:opacity-90 transition shadow-sm">发布卡组</button>
-              </div>
-            </div>
+            <div class="space-y-8 border-t lg:border-t-0 lg:border-l border-stone-200 pt-8 lg:pt-0 lg:pl-8">
+                
+                <div id="admin-panel" class="hidden bg-stone-50 p-1 rounded-lg border border-stone-200 text-xs shadow-xl animate-fade-in sticky top-8 z-40">
+                    
+                    <div class="flex p-1 bg-stone-100 rounded-md mb-4 relative">
+                        <button id="tab-media" onclick="toggleFormType('media')" class="flex-1 py-1.5 text-center font-bold rounded bg-white shadow-sm text-stone-800 transition flex items-center justify-center gap-1"><i data-lucide="library" class="w-3 h-3"></i> 书影音</button>
+                        <button id="tab-hearthstone" onclick="toggleFormType('hearthstone')" class="flex-1 py-1.5 text-center font-bold rounded text-stone-500 hover:text-stone-700 transition flex items-center justify-center gap-1"><i data-lucide="swords" class="w-3 h-3"></i> 炉石</button>
+                        <button id="tab-settings" onclick="toggleFormType('settings')" class="flex-1 py-1.5 text-center font-bold rounded text-stone-500 hover:text-stone-700 transition flex items-center justify-center gap-1"><i data-lucide="settings" class="w-3 h-3"></i> 设置</button>
+                        <button onclick="toggleAdminPanel()" class="absolute -top-3 -right-3 bg-white border border-stone-200 rounded-full w-6 h-6 flex items-center justify-center text-stone-400 hover:text-stone-700 shadow-sm"><i data-lucide="x" class="w-3 h-3"></i></button>
+                    </div>
 
-            <div id="form-settings" class="space-y-4 hidden pt-2">
-              <p class="text-[11px] text-stone-400 mb-3 bg-stone-100 p-2 rounded border border-stone-200">
-                <i data-lucide="info" class="w-3 h-3 inline"></i> 提示：关闭开关后，访客将无法在左侧菜单看到该板块，也无法访问里面的数据。
-              </p>
-              <div class="flex justify-between items-center border-b border-stone-100 pb-2">
-                <span class="font-bold text-stone-700 flex items-center gap-1"><i data-lucide="book-open" class="w-4 h-4"></i> 我的书单</span>
-                <input type="checkbox" id="set-reading" class="w-4 h-4 accent-douban">
-              </div>
-              <div class="flex justify-between items-center border-b border-stone-100 pb-2">
-                <span class="font-bold text-stone-700 flex items-center gap-1"><i data-lucide="film" class="w-4 h-4"></i> 我的电影</span>
-                <input type="checkbox" id="set-watching" class="w-4 h-4 accent-douban">
-              </div>
-              <div class="flex justify-between items-center border-b border-stone-100 pb-2">
-                <span class="font-bold text-stone-700 flex items-center gap-1"><i data-lucide="music" class="w-4 h-4"></i> 我的音乐</span>
-                <input type="checkbox" id="set-listening" class="w-4 h-4 accent-douban">
-              </div>
-              <div class="flex justify-between items-center border-b border-stone-100 pb-2">
-                <span class="font-bold text-stone-700 flex items-center gap-1"><i data-lucide="swords" class="w-4 h-4"></i> 炉石酒馆</span>
-                <input type="checkbox" id="set-hearthstone" class="w-4 h-4 accent-hearthstone">
-              </div>
+                    <div class="p-3 pt-0">
+                        <!-- 表单 1：书影音 -->
+                        <div id="form-media" class="space-y-3">
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-stone-400 mb-1">类别</label>
+                                    <select id="item-type" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                        <option value="reading">读书</option>
+                                        <option value="watching">电影</option>
+                                        <option value="listening">音乐</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-stone-400 mb-1">可见性</label>
+                                    <select id="item-is-public" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-bold text-stone-700">
+                                        <option value="true">公开 (访客可见)</option>
+                                        <option value="false">私密 (仅自己可见)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div class="col-span-2">
+                                    <label class="block text-stone-400 mb-1">名称</label>
+                                    <input type="text" id="item-title" placeholder="作品名称" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-3 gap-2 items-end">
+                                <div class="col-span-2">
+                                    <label class="block text-stone-400 mb-1">作者/导演</label>
+                                    <input type="text" id="item-author" placeholder="作者名" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-stone-400 mb-1">状态</label>
+                                    <select id="item-status" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                        <option value="collect">看过</option>
+                                        <option value="doing">在看</option>
+                                        <option value="wish">想看</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-3 gap-2 items-end">
+                                <div class="col-span-1">
+                                    <label class="block text-stone-400 mb-1">评分</label>
+                                    <select id="item-rating" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none text-amber-500 font-bold">
+                                        <option value="5">★★★★★</option>
+                                        <option value="4">★★★★☆</option>
+                                        <option value="3">★★★☆☆</option>
+                                        <option value="2">★★☆☆☆</option>
+                                        <option value="1">★☆☆☆☆</option>
+                                    </select>
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="block text-stone-400 mb-1">简短评论 (可选)</label>
+                                    <input type="text" id="item-comment" placeholder="一句话说说想法..." class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-stone-400 mb-1">上传文件 (支持多图, 可选)</label>
+                                <input type="file" id="item-file" accept="image/*,video/*" multiple class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none text-xs">
+                            </div>
+                            <div class="flex gap-2 mt-2">
+                                <button onclick="resetForms()" class="w-1/3 bg-stone-200 text-stone-600 py-2 rounded font-medium hover:bg-stone-300 transition">清空</button>
+                                <button id="add-btn" onclick="addItem()" class="w-2/3 bg-douban text-white py-2 rounded font-medium hover:opacity-90 transition">添加</button>
+                            </div>
+                        </div>
+
+                        <!-- 表单 2：炉石传说 -->
+                        <div id="form-hearthstone" class="space-y-3 hidden">
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-stone-400 mb-1">职业</label>
+                                    <select id="deck-class" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-bold text-stone-700 text-xs">
+                                        <option value="死亡骑士">死亡骑士</option>
+                                        <option value="恶魔猎手">恶魔猎手</option>
+                                        <option value="德鲁伊">德鲁伊</option>
+                                        <option value="猎人">猎人</option>
+                                        <option value="法师">法师</option>
+                                        <option value="圣骑士">圣骑士</option>
+                                        <option value="牧师">牧师</option>
+                                        <option value="潜行者">潜行者</option>
+                                        <option value="萨满祭司">萨满祭司</option>
+                                        <option value="术士">术士</option>
+                                        <option value="战士">战士</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-stone-400 mb-1">可见性</label>
+                                    <select id="deck-is-public" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-bold text-stone-700 text-xs">
+                                        <option value="true">公开</option>
+                                        <option value="false">私密</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div class="col-span-2">
+                                    <label class="block text-stone-400 mb-1">卡组名称 <span class="text-red-400">*</span></label>
+                                    <input type="text" id="deck-name" placeholder="如: 宇宙战" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-3 gap-2">
+                                <div>
+                                    <label class="block text-stone-400 mb-1">模式</label>
+                                    <select id="deck-mode" class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-bold text-stone-700 text-xs">
+                                        <option value="标准">标准</option>
+                                        <option value="狂野">狂野</option>
+                                        <option value="竞技场">竞技场</option>
+                                        <option value="其他">其他</option>
+                                    </select>
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="block text-stone-400 mb-1">代码 <span class="text-red-400">*</span></label>
+                                    <input type="text" id="deck-code" placeholder="AAECAQ..." class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none font-mono text-[10px]">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-stone-400 mb-1">上传文件 (支持多图, 可选)</label>
+                                <input type="file" id="deck-file" accept="image/*,video/*" multiple class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none text-xs">
+                            </div>
+                            <div>
+                                <label class="block text-stone-400 mb-1">卡组简介 (可选)</label>
+                                <textarea id="deck-desc" placeholder="说说这套卡组的优劣势或起手留牌..." class="w-full bg-white border border-stone-200 p-1.5 rounded focus:outline-none resize-none" rows="2"></textarea>
+                            </div>
+                            <div class="flex gap-2 mt-2">
+                                <button onclick="resetForms()" class="w-1/3 bg-stone-200 text-stone-600 py-2 rounded font-bold hover:bg-stone-300 transition shadow-sm">清空</button>
+                                <button id="deck-add-btn" onclick="addDeck()" class="w-2/3 bg-hearthstone text-white py-2 rounded font-bold hover:opacity-90 transition shadow-sm">发布卡组</button>
+                            </div>
+                        </div>
+
+                        <!-- 表单 3：全局板块设置 -->
+                        <div id="form-settings" class="space-y-4 hidden pt-2">
+                            <p class="text-[11px] text-stone-400 mb-3 bg-stone-100 p-2 rounded border border-stone-200">
+                                <i data-lucide="info" class="w-3 h-3 inline"></i> 提示：关闭开关后，访客将无法在左侧菜单/底部导航看到该板块，也无法访问里面的数据。
+                            </p>
+                            <div class="flex justify-between items-center border-b border-stone-100 pb-2">
+                                <span class="font-bold text-stone-700 flex items-center gap-1"><i data-lucide="book-open" class="w-4 h-4"></i> 我的书单</span>
+                                <input type="checkbox" id="set-reading" onchange="updateSettingDB('reading_visible', this.checked)" class="w-4 h-4 accent-douban">
+                            </div>
+                            <div class="flex justify-between items-center border-b border-stone-100 pb-2">
+                                <span class="font-bold text-stone-700 flex items-center gap-1"><i data-lucide="film" class="w-4 h-4"></i> 我的电影</span>
+                                <input type="checkbox" id="set-watching" onchange="updateSettingDB('watching_visible', this.checked)" class="w-4 h-4 accent-douban">
+                            </div>
+                            <div class="flex justify-between items-center border-b border-stone-100 pb-2">
+                                <span class="font-bold text-stone-700 flex items-center gap-1"><i data-lucide="music" class="w-4 h-4"></i> 我的音乐</span>
+                                <input type="checkbox" id="set-listening" onchange="updateSettingDB('listening_visible', this.checked)" class="w-4 h-4 accent-douban">
+                            </div>
+                            <div class="flex justify-between items-center border-b border-stone-100 pb-2">
+                                <span class="font-bold text-stone-700 flex items-center gap-1"><i data-lucide="swords" class="w-4 h-4"></i> 炉石酒馆</span>
+                                <input type="checkbox" id="set-hearthstone" onchange="updateSettingDB('hearthstone_visible', this.checked)" class="w-4 h-4 accent-hearthstone">
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-          </div>
         </div>
-      </div>
     </div>
-  </div>
 
-  <div id="media-preview-modal" class="modal-overlay hidden z-[110] bg-stone-900/90 backdrop-blur-sm">
-    <button id="preview-close" type="button" class="absolute top-4 right-4 z-20 text-white/90 hover:text-white w-10 h-10 flex items-center justify-center rounded-full bg-stone-800/60 hover:bg-stone-700/80 transition" aria-label="关闭">
-      <i data-lucide="x" class="w-6 h-6"></i>
-    </button>
-    <div id="media-preview-counter" class="absolute top-4 left-1/2 -translate-x-1/2 z-20 text-white/90 bg-stone-800/60 px-3 py-1 rounded-full text-xs font-mono hidden">1 / 3</div>
-    <button type="button" id="media-prev-btn" class="absolute left-4 top-1/2 -translate-y-1/2 z-20 text-white/70 hover:text-white w-12 h-12 flex items-center justify-center rounded-full bg-stone-800/50 hover:bg-stone-700/80 transition hidden">
-      <i data-lucide="chevron-left" class="w-8 h-8"></i>
-    </button>
-    <button type="button" id="media-next-btn" class="absolute right-4 top-1/2 -translate-y-1/2 z-20 text-white/70 hover:text-white w-12 h-12 flex items-center justify-center rounded-full bg-stone-800/50 hover:bg-stone-700/80 transition hidden">
-      <i data-lucide="chevron-right" class="w-8 h-8"></i>
-    </button>
-    <div class="modal-media-wrap">
-      <img id="media-preview-img" class="hidden object-contain rounded-lg shadow-2xl" alt="放大预览">
-      <video id="media-preview-video" class="hidden rounded-lg shadow-2xl" controls></video>
+    <!-- ==================== 沉浸式多图/视频画廊弹窗 ==================== -->
+    <div id="media-preview-modal" role="dialog" aria-modal="true" aria-label="媒体预览" class="hidden fixed inset-0 z-[110] bg-stone-900/95 backdrop-blur-md flex items-center justify-center p-4 sm:p-8" onclick="closeMediaPreview()">
+        
+        <button id="media-preview-close" type="button" onclick="event.stopPropagation(); closeMediaPreview();" class="absolute top-4 right-4 z-20 text-white/90 hover:text-white w-10 h-10 flex items-center justify-center rounded-full bg-stone-800/60 hover:bg-stone-700/80 transition" aria-label="关闭媒体预览">
+            <i data-lucide="x" class="w-6 h-6"></i>
+        </button>
+        
+        <div id="media-preview-counter" class="absolute top-4 left-1/2 -translate-x-1/2 z-20 text-white/90 bg-stone-800/60 px-3 py-1 rounded-full text-xs font-mono hidden">1 / 3</div>
+
+        <button type="button" id="media-prev-btn" onclick="event.stopPropagation(); navigatePreview(-1);" class="absolute left-4 top-1/2 -translate-y-1/2 z-20 text-white/70 hover:text-white w-12 h-12 flex items-center justify-center rounded-full bg-stone-800/50 hover:bg-stone-700/80 transition hidden pb-1">
+            <i data-lucide="chevron-left" class="w-8 h-8"></i>
+        </button>
+        <button type="button" id="media-next-btn" onclick="event.stopPropagation(); navigatePreview(1);" class="absolute right-4 top-1/2 -translate-y-1/2 z-20 text-white/70 hover:text-white w-12 h-12 flex items-center justify-center rounded-full bg-stone-800/50 hover:bg-stone-700/80 transition hidden pb-1">
+            <i data-lucide="chevron-right" class="w-8 h-8"></i>
+        </button>
+
+        <img id="media-preview-img" class="hidden max-h-[90vh] max-w-[95vw] object-contain rounded-lg shadow-2xl" onclick="event.stopPropagation()" alt="放大预览">
+        <video id="media-preview-video" class="hidden max-h-[90vh] max-w-[95vw] rounded-lg shadow-2xl" controls onclick="event.stopPropagation()"></video>
     </div>
-  </div>
 
-  <div id="login-modal" class="modal-overlay hidden z-[100] bg-stone-900/40 backdrop-blur-sm">
-    <div id="login-modal-content" class="modal-panel bg-white p-6 rounded-lg shadow-2xl max-w-[90%]">
-      <h3 class="text-lg font-bold text-stone-800 mb-2 flex items-center gap-1"><i data-lucide="key" class="w-5 h-5"></i> 隐藏入口</h3>
-      <p class="text-xs text-stone-500 mb-4">请输入站长专属暗号激活最高权限：</p>
-      <input type="password" id="secret-pwd" placeholder="输入密码..." class="w-full border border-stone-200 p-2 rounded mb-2 focus:outline-none focus:border-stone-800 focus:ring-1 focus:ring-stone-800 transition">
-      <p id="pwd-error" class="hidden text-xs text-red-500 mb-2 flex items-center gap-1"><i data-lucide="alert-circle" class="w-3 h-3"></i> 暗号错误，警报拉响！</p>
-      <div class="flex justify-end gap-2 mt-4">
-        <button id="login-cancel" type="button" class="px-4 py-2 text-xs text-stone-500 hover:bg-stone-100 rounded transition">取消</button>
-        <button id="login-submit" type="button" class="px-4 py-2 text-xs bg-stone-800 text-white rounded hover:bg-stone-700 transition shadow-sm">验证</button>
-      </div>
+    <!-- ==================== 站长登录炫酷弹窗 ==================== -->
+    <div id="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title" class="hidden fixed inset-0 bg-stone-900/40 backdrop-blur-sm z-[110] flex items-center justify-center transition-opacity">
+        <div id="login-modal-content" class="bg-white p-6 rounded-lg shadow-2xl w-80 max-w-[90%] transform transition-transform duration-100 ease-in-out">
+            <h3 id="login-title" class="text-lg font-bold text-stone-800 mb-2 flex items-center gap-1"><i data-lucide="key" class="w-5 h-5"></i> 站长登录</h3>
+            <p class="text-xs text-stone-500 mb-4">使用 Supabase Auth 站长账号登录。</p>
+            <label for="owner-email" class="block text-xs text-stone-600 mb-1">邮箱</label>
+            <input type="email" id="owner-email" autocomplete="username" placeholder="name@example.com" class="w-full border border-stone-200 p-2 rounded mb-3 focus:outline-none focus:border-stone-800 focus:ring-1 focus:ring-stone-800 transition">
+            <label for="secret-pwd" class="block text-xs text-stone-600 mb-1">密码</label>
+            <input type="password" id="secret-pwd" autocomplete="current-password" placeholder="输入密码" class="w-full border border-stone-200 p-2 rounded mb-2 focus:outline-none focus:border-stone-800 focus:ring-1 focus:ring-stone-800 transition" onkeydown="if(event.key==='Enter') checkPassword()">
+            <p id="pwd-error" role="alert" class="hidden text-xs text-red-500 mb-2"></p>
+            <div class="flex justify-end gap-2 mt-4">
+                <button type="button" onclick="closeDialog('login-modal')" class="px-4 py-2 text-xs text-stone-500 hover:bg-stone-100 rounded transition">取消</button>
+                <button id="login-submit-btn" type="button" onclick="checkPassword()" class="px-4 py-2 text-xs bg-stone-800 text-white rounded hover:bg-stone-700 disabled:opacity-50 transition shadow-sm">登录</button>
+            </div>
+        </div>
     </div>
-  </div>
 
-  <div id="logout-modal" class="modal-overlay hidden z-[100] bg-stone-900/40 backdrop-blur-sm">
-    <div class="modal-panel bg-white p-6 rounded-lg shadow-2xl max-w-[90%]">
-      <h3 class="text-lg font-bold text-stone-800 mb-2 flex items-center gap-1"><i data-lucide="log-out" class="w-5 h-5"></i> 退出站长模式</h3>
-      <p class="text-xs text-stone-500 mb-4">确定要退出登录，切回普通访客视角吗？</p>
-      <div class="flex justify-end gap-2">
-        <button id="logout-cancel" type="button" class="px-4 py-2 text-xs text-stone-500 hover:bg-stone-100 rounded transition">取消</button>
-        <button id="logout-submit" type="button" class="px-4 py-2 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition shadow-sm">确定退出</button>
-      </div>
+    <!-- ==================== 退出登录弹窗 ==================== -->
+    <div id="logout-modal" role="dialog" aria-modal="true" aria-labelledby="logout-title" class="hidden fixed inset-0 bg-stone-900/40 backdrop-blur-sm z-[110] flex items-center justify-center transition-opacity">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-80 max-w-[90%] transform transition-all">
+            <h3 id="logout-title" class="text-lg font-bold text-stone-800 mb-2 flex items-center gap-1"><i data-lucide="log-out" class="w-5 h-5"></i> 退出站长模式</h3>
+            <p class="text-xs text-stone-500 mb-4">确定要退出登录，切回普通访客视角吗？</p>
+            <div class="flex justify-end gap-2">
+                <button type="button" onclick="closeDialog('logout-modal')" class="px-4 py-2 text-xs text-stone-500 hover:bg-stone-100 rounded transition">取消</button>
+                <button id="logout-confirm-btn" type="button" onclick="confirmLogout()" class="px-4 py-2 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition shadow-sm">确定退出</button>
+            </div>
+        </div>
     </div>
-  </div>
 
-  <div id="confirm-modal" class="modal-overlay hidden z-[120] bg-stone-900/40 backdrop-blur-sm">
-    <div class="modal-panel bg-white p-6 rounded-lg shadow-2xl max-w-[90%]">
-      <h3 id="confirm-title" class="text-lg font-bold text-stone-800 mb-2">确认操作</h3>
-      <p id="confirm-message" class="text-xs text-stone-500 mb-4"></p>
-      <div class="flex justify-end gap-2">
-        <button id="confirm-cancel" type="button" class="px-4 py-2 text-xs text-stone-500 hover:bg-stone-100 rounded transition">取消</button>
-        <button id="confirm-ok" type="button" class="px-4 py-2 text-xs bg-stone-800 text-white rounded hover:bg-stone-700 transition shadow-sm">确定</button>
-      </div>
-    </div>
-  </div>
-
-  <script type="module" src="/src/main.js"></script>
 </body>
 </html>
